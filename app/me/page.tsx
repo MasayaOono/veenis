@@ -19,7 +19,7 @@ import {
   CardActionArea,
   CardHeader,
 } from "@mui/material";
-import Grid from "@mui/material/Grid"; // ★ v7: Grid v2（子は size を使う）
+import Grid from "@mui/material/Grid";
 import NextLink from "next/link";
 
 /** ===== 型 ===== */
@@ -60,6 +60,9 @@ type FeedPost = {
   author_display_name: string | null;
   author_avatar_url: string | null;
   like_count: number;
+  // もし RPC が visibility / group_id を返せるなら入れるとより安全:
+  // visibility?: "public" | "link" | "group";
+  // group_id?: string | null;
 };
 
 const OVERVIEW_PREVIEW_LIMIT = 5;
@@ -153,7 +156,7 @@ export default function MePage() {
         .eq("is_published", false);
       setDraftCount(draftRes.count ?? 0);
 
-      // 総いいね数
+      // 総いいね数（自分の投稿に付いたもの合計）
       const likeRes = await supabase
         .from("post_likes")
         .select("post_id, posts!inner(id,author_id)", {
@@ -166,13 +169,12 @@ export default function MePage() {
     loadStats();
   }, []);
 
-  /** ===== ダイジェスト読み込み ===== */
+  /** ===== 自分の投稿プレビュー ===== */
   useEffect(() => {
-    const loadPreviews = async () => {
+    const loadMine = async () => {
       const { data: me } = await supabase.auth.getUser();
       const uid = me.user?.id;
 
-      // 自分の投稿プレビュー（下書き含む）
       if (uid) {
         const { data, error } = await supabase
           .from("posts")
@@ -187,19 +189,40 @@ export default function MePage() {
       } else {
         setMinePreview([]);
       }
+    };
+    loadMine();
+  }, []);
 
-      // 所属グループ/公開の新着プレビュー
-      const { data: feed, error: e2 } = await supabase.rpc("list_posts", {
+  /** ===== グループ新着プレビュー =====
+   * 所属グループが 0 件なら「読み込みも表示もしない」。
+   * 所属がある場合のみ RPC を叩く。
+   */
+  useEffect(() => {
+    const loadGroupFeed = async () => {
+      if (groupsCount === 0) {
+        setGroupPreview([]); // 何も表示しない
+        return;
+      }
+      // ★ ここは「グループ限定のみ」を返す RPC があればそちらを使うのが理想。
+      // ない場合は既存 list_posts を使いつつ、サーバー側で RLS により
+      // 所属グループ記事だけ可視になっている前提。
+      const { data, error } = await supabase.rpc("list_posts", {
         p_q: null,
         p_sort: "new",
         p_limit: OVERVIEW_PREVIEW_LIMIT,
         p_offset: 0,
+        // もしサーバー側が対応していれば:
+        // p_only_group: true
       });
-      if (e2) setMsg(e2.message);
-      setGroupPreview((feed ?? []) as FeedPost[]);
+      if (error) {
+        setMsg(error.message);
+        setGroupPreview([]);
+        return;
+      }
+      setGroupPreview((data ?? []) as FeedPost[]);
     };
-    loadPreviews();
-  }, []);
+    loadGroupFeed();
+  }, [groupsCount]);
 
   /** ===== 表示ユーティリティ ===== */
   const visibilityChip = (v: MyPost["visibility"], is_published: boolean) => {
@@ -217,7 +240,6 @@ export default function MePage() {
         マイページ
       </Typography>
 
-      {/* 2カラム（sm以下は縦積み） */}
       <Grid container spacing={3}>
         {/* 左：ユーザー情報カード */}
         <Grid size={{ xs: 12, md: 4 }}>
@@ -244,7 +266,6 @@ export default function MePage() {
               }
             />
             <CardContent>
-              {/* 統計 */}
               <Stack spacing={1.5}>
                 <Typography variant="subtitle2" color="text.secondary">
                   ユーザー情報
@@ -256,7 +277,6 @@ export default function MePage() {
                   <Stat label="参加グループ" value={groupsCount} />
                 </Stack>
 
-                {/* 所属グループ一覧（軽く） */}
                 <Divider sx={{ my: 1.5 }} />
                 <Typography variant="subtitle2" color="text.secondary">
                   所属グループ
@@ -293,10 +313,10 @@ export default function MePage() {
           </Card>
         </Grid>
 
-        {/* 右：記事ダイジェスト（自分の投稿 / 所属グループ新着） */}
+        {/* 右：記事ダイジェスト */}
         <Grid size={{ xs: 12, md: 8 }}>
           <Stack spacing={4}>
-            {/* 自分の投稿（最新プレビュー） */}
+            {/* 自分の投稿（最新） */}
             <Stack spacing={1}>
               <Stack
                 direction="row"
@@ -349,87 +369,91 @@ export default function MePage() {
               </Stack>
             </Stack>
 
-            {/* 所属グループ/公開（最新プレビュー） */}
-            <Stack spacing={1}>
-              <Stack
-                direction="row"
-                justifyContent="space-between"
-                alignItems="baseline"
-              >
-                <Typography variant="h6">
-                  所属グループの新着（公開/グループ限定）
-                </Typography>
-                <Button component={NextLink} href="/me/groups?page=1">
-                  すべて見る
-                </Button>
-              </Stack>
+            {/* 所属グループの新着（所属があるときだけ表示） */}
+            {groupsCount > 0 && (
               <Stack spacing={1}>
-                {groupPreview === null ? (
-                  <Skeleton variant="rounded" height={120} />
-                ) : groupPreview.length === 0 ? (
-                  <Typography variant="body2" color="text.secondary">
-                    表示できる記事がありません
+                <Stack
+                  direction="row"
+                  justifyContent="space-between"
+                  alignItems="baseline"
+                >
+                  <Typography variant="h6">
+                    所属グループの新着（限定公開）
                   </Typography>
-                ) : (
-                  groupPreview.map((p) => (
-                    <Card key={p.id} variant="outlined">
-                      <CardActionArea
-                        component={NextLink}
-                        href={`/posts/${p.slug}`}
-                      >
-                        <CardContent>
-                          <Stack
-                            direction="row"
-                            spacing={1}
-                            alignItems="center"
-                            flexWrap="wrap"
-                          >
-                            <Typography variant="subtitle1">
-                              {p.title}
-                            </Typography>
-                            <Chip size="small" label="新着" />
-                          </Stack>
-                          <Stack
-                            direction="row"
-                            spacing={1}
-                            alignItems="center"
-                            sx={{ mt: 0.5 }}
-                          >
-                            <Avatar
-                              src={p.author_avatar_url ?? undefined}
-                              sx={{ width: 24, height: 24 }}
-                            />
-                            <Typography
-                              variant="caption"
-                              color="text.secondary"
+                  <Button component={NextLink} href="/me/groups?page=1">
+                    すべて見る
+                  </Button>
+                </Stack>
+                <Stack spacing={1}>
+                  {groupPreview === null ? (
+                    <Skeleton variant="rounded" height={120} />
+                  ) : groupPreview.length === 0 ? (
+                    <Typography variant="body2" color="text.secondary">
+                      表示できる記事がありません
+                    </Typography>
+                  ) : (
+                    groupPreview.map((p) => (
+                      <Card key={p.id} variant="outlined">
+                        <CardActionArea
+                          component={NextLink}
+                          href={`/posts/${p.slug}`}
+                        >
+                          <CardContent>
+                            <Stack
+                              direction="row"
+                              spacing={1}
+                              alignItems="center"
+                              flexWrap="wrap"
                             >
-                              {p.author_display_name ??
-                                p.author_username ??
-                                "匿名"}
-                            </Typography>
-                            <Typography
-                              variant="caption"
-                              color="text.secondary"
+                              <Typography variant="subtitle1">
+                                {p.title}
+                              </Typography>
+                              <Chip size="small" label="新着" />
+                            </Stack>
+                            <Stack
+                              direction="row"
+                              spacing={1}
+                              alignItems="center"
+                              sx={{ mt: 0.5 }}
                             >
-                              ・
-                              {p.published_at
-                                ? new Date(p.published_at).toLocaleDateString()
-                                : ""}
-                            </Typography>
-                            <Typography
-                              variant="caption"
-                              color="text.secondary"
-                            >
-                              ・❤ {p.like_count}
-                            </Typography>
-                          </Stack>
-                        </CardContent>
-                      </CardActionArea>
-                    </Card>
-                  ))
-                )}
+                              <Avatar
+                                src={p.author_avatar_url ?? undefined}
+                                sx={{ width: 24, height: 24 }}
+                              />
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                              >
+                                {p.author_display_name ??
+                                  p.author_username ??
+                                  "匿名"}
+                              </Typography>
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                              >
+                                ・
+                                {p.published_at
+                                  ? new Date(
+                                      p.published_at
+                                    ).toLocaleDateString()
+                                  : ""}
+                              </Typography>
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                              >
+                                ・❤ {p.like_count}
+                              </Typography>
+                            </Stack>
+                          </CardContent>
+                        </CardActionArea>
+                      </Card>
+                    ))
+                  )}
+                </Stack>
               </Stack>
-            </Stack>
+            )}
           </Stack>
         </Grid>
       </Grid>

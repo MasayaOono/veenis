@@ -1,3 +1,22 @@
+html, body {
+  height: 100%;
+}
+body.layout-root {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column; /* 縦積み：Header / main / Footer */
+}
+
+/* main を“伸びる領域”にする */
+.site-main {
+  flex: 1 0 auto;
+  display: block; /* 念のため */
+}
+
+/* （任意）Footer を縮まないようにする：既定で shrink:1 なので明示 */
+footer {
+  flex-shrink: 0;
+}
 .article-body h1 {
   font-size: 1.8rem;
   border-bottom: 1px solid rgba(0, 0, 0, 0.12);

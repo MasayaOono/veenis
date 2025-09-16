@@ -15,17 +15,21 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ja">
-      <body>
+      {/* body をフレックス親にするのは globals.css 側で実施 */}
+      <body className="layout-root">
         <Suspense fallback={null}>
           <Providers>
             <Header />
-            <Container
-              maxWidth={false}
-              disableGutters
-              sx={{ py: 3, px: { xs: 2, sm: 3 } }}
-            >
-              {children}
-            </Container>
+            {/* ここを main でラップして、flex伸縮の“本体”にする */}
+            <main className="site-main">
+              <Container
+                maxWidth={false}
+                disableGutters
+                sx={{ py: 3, px: { xs: 2, sm: 3 } }}
+              >
+                {children}
+              </Container>
+            </main>
             <Footer />
           </Providers>
         </Suspense>

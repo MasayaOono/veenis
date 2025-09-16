@@ -1,3 +1,4 @@
+// app/onboarding/page.tsx
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -11,12 +12,12 @@ import {
   Typography,
   Alert,
   CircularProgress,
+  MenuItem,
 } from "@mui/material";
 import { supabase } from "@/lib/supabaseClient";
 
 function validateUsername(raw: string) {
   const v = raw.normalize("NFKC").toLowerCase().trim();
-  // 半角英数・アンダースコア・ハイフン・ドット、3〜32文字
   const ok = /^[a-z0-9._-]{3,32}$/.test(v);
   return { ok, v };
 }
@@ -25,18 +26,28 @@ async function uploadAvatar(file: File) {
   const { data: me } = await supabase.auth.getUser();
   const uid = me?.user?.id;
   if (!uid) throw new Error("auth required");
-
   const ext = (file.name.split(".").pop() || "png").toLowerCase();
   const path = `${uid}/avatar-${Date.now()}.${ext}`;
-
   const { error } = await supabase.storage
     .from("public-images")
     .upload(path, file, { cacheControl: "3600", upsert: true });
   if (error) throw error;
-
   const { data } = supabase.storage.from("public-images").getPublicUrl(path);
   return data.publicUrl as string;
 }
+
+const JOB_OPTIONS = [
+  "美容師",
+  "理容師",
+  "ネイリスト",
+  "アイリスト",
+  "エステティシャン",
+  "メイクアップアーティスト",
+  "美容学生",
+  "サロンオーナー/店長",
+  "受付/レセプション",
+  "その他",
+];
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -51,6 +62,7 @@ export default function OnboardingPage() {
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [job, setJob] = useState<string>(""); // 追加
 
   const [file, setFile] = useState<File | null>(null);
   const previewUrl = useMemo(
@@ -59,7 +71,6 @@ export default function OnboardingPage() {
   );
   const previewRef = useRef<string | null>(null);
   useEffect(() => {
-    // preview URL revoke
     if (previewUrl && previewUrl.startsWith("blob:")) {
       if (previewRef.current) URL.revokeObjectURL(previewRef.current);
       previewRef.current = previewUrl;
@@ -71,7 +82,6 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     (async () => {
-      // 認証チェック
       const { data } = await supabase.auth.getUser();
       const user = data.user;
       if (!user) {
@@ -80,16 +90,17 @@ export default function OnboardingPage() {
       }
       setUid(user.id);
 
-      // 既存プロフィール読込
+      // 既存プロフィール読込（job を追加）
       const { data: prof } = await supabase
         .from("profiles")
-        .select("username, display_name, avatar_url")
+        .select("username, display_name, avatar_url, job")
         .eq("user_id", user.id)
         .maybeSingle();
 
       setUsername(prof?.username ?? "");
       setDisplayName(prof?.display_name ?? "");
       setAvatarUrl(prof?.avatar_url ?? null);
+      setJob(prof?.job ?? ""); // 追加
 
       setLoading(false);
     })();
@@ -103,8 +114,8 @@ export default function OnboardingPage() {
   const onSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!uid) return;
-
     setErr(null);
+
     const { ok, v } = validateUsername(username);
     if (!ok) {
       setErr("ユーザー名は半角英数字・._- の3〜32文字で入力してください。");
@@ -113,24 +124,21 @@ export default function OnboardingPage() {
 
     setSaving(true);
     try {
-      // 画像は保存時にだけアップロード
       let finalAvatarUrl = avatarUrl;
-      if (file) {
-        finalAvatarUrl = await uploadAvatar(file);
-      }
+      if (file) finalAvatarUrl = await uploadAvatar(file);
 
-      // 自分のプロフィールだけ upsert（RLS: profiles self rw）
+      // upsert に job を追加
       const { error } = await supabase.from("profiles").upsert(
         {
           user_id: uid,
           username: v,
           display_name: displayName.trim() || null,
           avatar_url: finalAvatarUrl,
+          job: job || null, // 追加
         },
         { onConflict: "user_id" }
       );
       if (error) {
-        // 重複ユーザー名の考慮
         if ((error as any).code === "23505") {
           throw new Error("そのユーザー名は既に使用されています。");
         }
@@ -166,7 +174,7 @@ export default function OnboardingPage() {
         <Stack spacing={2}>
           <Stack direction="row" spacing={2} alignItems="center">
             <Avatar
-              src={previewUrl || undefined} // 空文字は渡さない
+              src={previewUrl || undefined}
               sx={{ width: 72, height: 72 }}
             />
             <Button variant="outlined" component="label">
@@ -195,6 +203,24 @@ export default function OnboardingPage() {
             onChange={(e) => setDisplayName(e.target.value)}
             inputProps={{ maxLength: 80 }}
           />
+
+          {/* 職業（任意） */}
+          <TextField
+            select
+            label="職業（任意）"
+            value={job}
+            onChange={(e) => setJob(e.target.value)}
+            helperText="おすすめ：あなたに近い職種を選択（分析やおすすめで使います）"
+          >
+            <MenuItem value="">
+              <em>未選択</em>
+            </MenuItem>
+            {JOB_OPTIONS.map((j) => (
+              <MenuItem key={j} value={j}>
+                {j}
+              </MenuItem>
+            ))}
+          </TextField>
 
           {err && <Alert severity="error">{err}</Alert>}
 

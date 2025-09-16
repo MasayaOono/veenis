@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams, useParams } from "next/navigation";
+import { useSearchParams, useParams, useRouter } from "next/navigation";
 import NextLink from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import {
@@ -13,9 +13,16 @@ import {
   Avatar,
   Stack,
   Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
+  Snackbar,
 } from "@mui/material";
 import FavoriteBorderIcon from "@mui/icons-material/FavoriteBorder";
 import FavoriteIcon from "@mui/icons-material/Favorite";
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
@@ -25,7 +32,8 @@ import ContentColumn from "@/app/_components/ContentColumn";
 
 type PostRow = any;
 
-export default function PostDetailPage() {
+export default function PostEditPage() {
+  const router = useRouter();
   const { slug } = useParams<{ slug: string }>();
   const params = useSearchParams();
   const token = params.get("token");
@@ -41,6 +49,11 @@ export default function PostDetailPage() {
     avatar_url?: string;
   } | null>(null);
   const [isOwner, setIsOwner] = useState(false);
+
+  // 削除UI
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [busyDelete, setBusyDelete] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -151,19 +164,35 @@ export default function PostDetailPage() {
     }
   };
 
-  // ショートカット: E で編集（本人のみ）
-  useEffect(() => {
-    if (!isOwner || !post?.slug) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() === "e") {
-        window.location.href = `/posts/${encodeURIComponent(post.slug)}/edit${
-          token ? `?token=${token}` : ""
-        }`;
+  // 削除実行（まずは RPC があれば使い、なければ posts 直接削除）
+  const handleDelete = async () => {
+    if (!post?.id) return;
+    setBusyDelete(true);
+    try {
+      // 1) もしサーバ側にカスケードRPCがあるならそれを優先
+      const rpc = await supabase.rpc("delete_post_cascade", {
+        p_post_id: post.id,
+      });
+      if (rpc.error && !/function .* does not exist/i.test(rpc.error.message)) {
+        throw rpc.error;
       }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [isOwner, post?.slug, token]);
+      if (!rpc.error) {
+        setToast("記事を削除しました。");
+      } else {
+        // 2) RPCが無い/失敗→postsをRLSで削除（likes/tagsはDB側トリガやON DELETEで整理する想定）
+        const del = await supabase.from("posts").delete().eq("id", post.id);
+        if (del.error) throw del.error;
+        setToast("記事を削除しました。");
+      }
+      // 削除後：マイページへ
+      router.replace("/me");
+    } catch (e: any) {
+      setToast(e?.message ?? "削除に失敗しました。");
+    } finally {
+      setBusyDelete(false);
+      setConfirmOpen(false);
+    }
+  };
 
   if (loading) return <Typography>読み込み中...</Typography>;
   if (error) return <Alert severity="error">{error}</Alert>;
@@ -185,7 +214,7 @@ export default function PostDetailPage() {
       {/* 本文（入力と同じ横幅でセンタリング） */}
       <Box sx={{ flex: 1, minWidth: 0 }}>
         <ContentColumn maxWidth={760}>
-          {/* タイトル + 編集導線 */}
+          {/* タイトル + 編集/削除導線 */}
           <Stack
             direction="row"
             justifyContent="space-between"
@@ -197,16 +226,35 @@ export default function PostDetailPage() {
             </Typography>
 
             {isOwner && (
-              <Button
-                component={NextLink}
-                href={`/posts/${encodeURIComponent(post.slug)}/edit${
-                  token ? `?token=${token}` : ""
-                }`}
-                variant="outlined"
-                size="small"
-              >
-                編集
-              </Button>
+              <Stack direction="row" spacing={1}>
+                <Button
+                  component={NextLink}
+                  href={`/posts/${encodeURIComponent(post.slug)}`}
+                  variant="outlined"
+                  size="small"
+                >
+                  表示へ戻る
+                </Button>
+                <Button
+                  component={NextLink}
+                  href={`/posts/${encodeURIComponent(post.slug)}/edit${
+                    token ? `?token=${token}` : ""
+                  }`}
+                  variant="outlined"
+                  size="small"
+                >
+                  編集
+                </Button>
+                <Button
+                  color="error"
+                  variant="contained"
+                  size="small"
+                  startIcon={<DeleteOutlineIcon />}
+                  onClick={() => setConfirmOpen(true)}
+                >
+                  削除
+                </Button>
+              </Stack>
             )}
           </Stack>
 
@@ -278,7 +326,7 @@ export default function PostDetailPage() {
           <Typography variant="subtitle2" gutterBottom>
             目次
           </Typography>
-          {toc.map((item) => (
+          {toc.map((item: any) => (
             <Typography
               key={item.id}
               variant="body2"
@@ -289,6 +337,41 @@ export default function PostDetailPage() {
           ))}
         </Paper>
       </Box>
+
+      {/* 削除ダイアログ */}
+      <Dialog
+        open={confirmOpen}
+        onClose={() => !busyDelete && setConfirmOpen(false)}
+      >
+        <DialogTitle>記事を削除しますか？</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            この操作は元に戻せません。記事本文・メタ情報は削除されます。
+            （いいね/タグ等はDBの設定により併せて削除・無効化されます）
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmOpen(false)} disabled={busyDelete}>
+            キャンセル
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={handleDelete}
+            disabled={busyDelete}
+          >
+            {busyDelete ? "削除中…" : "削除する"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* トースト */}
+      <Snackbar
+        open={!!toast}
+        autoHideDuration={3000}
+        onClose={() => setToast(null)}
+        message={toast ?? ""}
+      />
     </Box>
   );
 }
