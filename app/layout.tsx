@@ -5,6 +5,7 @@ import Header from "./_components/Header";
 import { Container } from "@mui/material";
 import "./globals.css";
 import { Suspense } from "react";
+import Footer from "./_components/Footer";
 export const metadata: Metadata = { title: "Veenis" };
 
 export default function RootLayout({
@@ -25,6 +26,7 @@ export default function RootLayout({
             >
               {children}
             </Container>
+            <Footer />
           </Providers>
         </Suspense>
       </body>

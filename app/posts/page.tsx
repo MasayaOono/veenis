@@ -250,7 +250,7 @@ export default function PostsIndexPage() {
   }, [myTags]);
 
   return (
-    <Box sx={{ width: 1500, mx: "auto", px: 2, py: 3 }}>
+    <Box sx={{ mx: "auto", px: 2, py: 3 }}>
       {/* 検索バー + ソート */}
       <Stack
         direction={{ xs: "column", md: "row" }}
