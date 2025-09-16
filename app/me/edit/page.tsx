@@ -9,7 +9,6 @@ import {
   Card,
   CardContent,
   CardHeader,
-  Grid,
   Snackbar,
   Alert,
   Stack,
@@ -19,6 +18,7 @@ import {
   LinearProgress,
 } from "@mui/material";
 import NextLink from "next/link";
+import Grid from "@mui/material/Grid"; // v7: Grid v2（子は item 不要、size を使う）
 
 type Profile = {
   user_id: string;
@@ -134,8 +134,8 @@ export default function EditProfilePage() {
         .getPublicUrl(path);
       setAvatarUrl(data.publicUrl);
       setMessage("アイコンをアップロードしました");
-    } catch (e: any) {
-      setMessage(e?.message ?? "アップロードに失敗しました");
+    } catch (e: unknown) {
+      setMessage(e instanceof Error ? e.message : "アップロードに失敗しました");
     } finally {
       setSaving(false);
     }
@@ -160,7 +160,8 @@ export default function EditProfilePage() {
         {loading && <LinearProgress />}
         <CardContent>
           <Grid container spacing={3}>
-            <Grid item xs={12} md={8}>
+            {/* 左カラム */}
+            <Grid size={{ xs: 12, md: 8 }}>
               <Stack spacing={2}>
                 <TextField
                   label="ユーザー名（3〜32文字、英数字・_）"
@@ -198,7 +199,8 @@ export default function EditProfilePage() {
               </Stack>
             </Grid>
 
-            <Grid item xs={12} md={4}>
+            {/* 右カラム */}
+            <Grid size={{ xs: 12, md: 4 }}>
               <Stack spacing={1.5} alignItems="center">
                 <Avatar
                   src={avatarUrl || undefined}

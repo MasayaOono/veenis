@@ -17,9 +17,9 @@ import {
   Card,
   CardContent,
   CardActionArea,
-  Grid,
   CardHeader,
 } from "@mui/material";
+import Grid from "@mui/material/Grid"; // ★ v7: Grid v2（子は size を使う）
 import NextLink from "next/link";
 
 /** ===== 型 ===== */
@@ -145,7 +145,7 @@ export default function MePage() {
         .eq("is_published", true);
       setPublishedCount(pubRes.count ?? 0);
 
-      // 下書き記事数（is_published=false を下書きとみなす）
+      // 下書き記事数
       const draftRes = await supabase
         .from("posts")
         .select("id", { count: "exact", head: true })
@@ -153,8 +153,7 @@ export default function MePage() {
         .eq("is_published", false);
       setDraftCount(draftRes.count ?? 0);
 
-      // 総いいね数：自分の投稿に付いた post_likes の件数
-      // PostgRESTのリレーションフィルタを使って、post_likes に posts を inner join 相当で絞り込む
+      // 総いいね数
       const likeRes = await supabase
         .from("post_likes")
         .select("post_id, posts!inner(id,author_id)", {
@@ -189,7 +188,7 @@ export default function MePage() {
         setMinePreview([]);
       }
 
-      // 所属グループ/公開の新着プレビュー（公開済のみ/RLSで自動制限）
+      // 所属グループ/公開の新着プレビュー
       const { data: feed, error: e2 } = await supabase.rpc("list_posts", {
         p_q: null,
         p_sort: "new",
@@ -221,7 +220,7 @@ export default function MePage() {
       {/* 2カラム（sm以下は縦積み） */}
       <Grid container spacing={3}>
         {/* 左：ユーザー情報カード */}
-        <Grid item xs={12} md={4}>
+        <Grid size={{ xs: 12, md: 4 }}>
           <Card variant="outlined">
             <CardHeader
               avatar={<Avatar src={profile?.avatar_url ?? undefined} />}
@@ -295,7 +294,7 @@ export default function MePage() {
         </Grid>
 
         {/* 右：記事ダイジェスト（自分の投稿 / 所属グループ新着） */}
-        <Grid item xs={12} md={8}>
+        <Grid size={{ xs: 12, md: 8 }}>
           <Stack spacing={4}>
             {/* 自分の投稿（最新プレビュー） */}
             <Stack spacing={1}>

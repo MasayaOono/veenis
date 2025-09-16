@@ -1,3 +1,4 @@
+// app/users/[username]/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -8,7 +9,6 @@ import {
   Box,
   Chip,
   Divider,
-  Grid,
   Link,
   Paper,
   Stack,
@@ -36,9 +36,19 @@ type PostRow = {
   author_id: string;
 };
 
+// groups は単一オブジェクト or null を想定
 type GroupRow = {
-  groups?: { id: string; name: string; owner_id: string } | null;
+  groups: { id: string; name: string; owner_id: string } | null;
   role: "owner" | "admin" | "member";
+};
+
+// API からの生データ（配列で返る場合に備えるための緩い型）
+type RawGroupRow = {
+  role: string;
+  groups?:
+    | { id: string; name: string; owner_id: string }
+    | { id: string; name: string; owner_id: string }[]
+    | null;
 };
 
 export default function UserProfilePage() {
@@ -63,7 +73,7 @@ export default function UserProfilePage() {
       const { data: me } = await supabase.auth.getUser();
       setMeId(me.user?.id ?? null);
 
-      // プロフィール取得（usernameで検索）
+      // プロフィール取得
       const profRes = await supabase
         .from("profiles")
         .select("user_id, username, display_name, avatar_url, created_at")
@@ -78,7 +88,7 @@ export default function UserProfilePage() {
       const prof = profRes.data as Profile;
       setProfile(prof);
 
-      // 公開記事（+視聴者が見られるグループ記事）を取得
+      // 公開/グループ記事
       const postRes = await supabase
         .from("posts")
         .select("id, title, slug, cover_image_url, published_at, author_id")
@@ -91,26 +101,29 @@ export default function UserProfilePage() {
         const list = postRes.data as PostRow[];
         setPosts(list);
 
-        // いいね総数（可視な記事に限定）
+        // いいね総数
         if (list.length > 0) {
           const ids = list.map((p) => p.id);
           const likesRes = await supabase
             .from("post_likes")
-            .select("post_id") // RLS: likesは誰でもselect可
+            .select("post_id")
             .in("post_id", ids);
 
           if (!likesRes.error && likesRes.data) {
-            const map = new Map<string, number>();
+            const counts = new Map<string, number>();
             for (const row of likesRes.data as { post_id: string }[]) {
-              map.set(row.post_id, (map.get(row.post_id) ?? 0) + 1);
+              counts.set(row.post_id, (counts.get(row.post_id) ?? 0) + 1);
             }
-            const total = Array.from(map.values()).reduce((a, b) => a + b, 0);
+            const total = Array.from(counts.values()).reduce(
+              (a, b) => a + b,
+              0
+            );
             setTotalLikes(total);
           }
         }
       }
 
-      // 自分のページを見ているなら、下書き数も出す
+      // 自分のページなら下書き数
       if (me.user?.id && me.user.id === prof.user_id) {
         const drafts = await supabase
           .from("posts")
@@ -120,15 +133,26 @@ export default function UserProfilePage() {
         if (!drafts.error) setDraftCount(drafts.count ?? 0);
       }
 
-      // 所属グループ（閲覧者がメンバーのグループのみRLSで可視）
-      // 自分自身であれば自分の全所属が見える
+      // 所属グループ（配列で返る場合を正規化）
       const gmRes = await supabase
         .from("group_members")
         .select("role, groups ( id, name, owner_id )")
         .eq("user_id", prof.user_id);
 
       if (!gmRes.error && gmRes.data) {
-        setGroups(gmRes.data as GroupRow[]);
+        const normalized: GroupRow[] = (gmRes.data as RawGroupRow[]).map(
+          (r) => {
+            const g = Array.isArray(r.groups)
+              ? r.groups[0] ?? null
+              : r.groups ?? null;
+            const role =
+              r.role === "owner" || r.role === "admin" || r.role === "member"
+                ? r.role
+                : "member";
+            return { role, groups: g };
+          }
+        );
+        setGroups(normalized);
       }
 
       setLoading(false);
@@ -136,7 +160,7 @@ export default function UserProfilePage() {
   }, [username]);
 
   const isMe = useMemo(
-    () => meId && profile && meId === profile.user_id,
+    () => !!(meId && profile && meId === profile.user_id),
     [meId, profile]
   );
 
@@ -239,54 +263,35 @@ export default function UserProfilePage() {
       {/* 記事一覧 */}
       <Box
         sx={{
-          display: "flex",
-          alignItems: "baseline",
-          justifyContent: "space-between",
-          mb: 1,
+          display: "grid",
+          gap: 2,
+          gridTemplateColumns: {
+            xs: "1fr",
+            sm: "repeat(2, 1fr)",
+            md: "repeat(3, 1fr)",
+            lg: "repeat(4, 1fr)",
+          },
         }}
       >
-        <Typography variant="h6">公開記事</Typography>
-        {posts.length > 0 && (
-          <Typography variant="body2" color="text.secondary">
-            新着順 / グループ限定記事はメンバーのみ表示
-          </Typography>
-        )}
-      </Box>
-
-      {posts.length === 0 ? (
-        <Alert severity="info">公開記事はまだありません。</Alert>
-      ) : (
-        <Box
-          sx={{
-            display: "grid",
-            gap: 2,
-            gridTemplateColumns: {
-              xs: "1fr",
-              sm: "repeat(2, 1fr)",
-              md: "repeat(3, 1fr)",
-              lg: "repeat(4, 1fr)",
-            },
-          }}
-        >
-          {posts.map((p) => (
+        {posts.length === 0 ? (
+          <Alert severity="info">公開記事はまだありません。</Alert>
+        ) : (
+          posts.map((p) => (
             <PostCard
               key={p.id}
               title={p.title}
               slug={p.slug}
               cover_image_url={p.cover_image_url}
-              likeCount={
-                /* 各記事の個別いいね数（必要なら） */
-                undefined as any as number // ← 省略するならPostCard側で0扱いに
-              }
+              likeCount={0} // ← ダミー値（PostCard 側で省略可にしてもOK）
               author={{
                 display_name: profile.display_name,
                 username: profile.username,
                 avatar_url: profile.avatar_url,
               }}
             />
-          ))}
-        </Box>
-      )}
+          ))
+        )}
+      </Box>
     </Box>
   );
 }

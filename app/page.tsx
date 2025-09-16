@@ -17,7 +17,7 @@ export const runtime = "nodejs";
 // 認証/DBアクセスあり：キャッシュさせない
 export const dynamic = "force-dynamic";
 
-// Next.js 15: searchParams は Promise になる
+// Next.js 15: searchParams は Promise
 type SearchParams = Promise<{ sort?: string }>;
 
 type PostCardData = {
@@ -36,7 +36,7 @@ export default async function HomePage({
   const sp = await searchParams;
   const sort: "new" | "popular" = sp?.sort === "popular" ? "popular" : "new";
 
-  const sb = getServerSupabase();
+  const sb = await getServerSupabase();
 
   // RPC: 可視記事のみ + いいね数 + 著者情報JOIN済（p_limit/p_offsetでページング可）
   const { data, error } = await sb.rpc("list_posts", {
@@ -69,7 +69,7 @@ export default async function HomePage({
             const img =
               p.cover_image_url ?? getPlaceholderCoverDataUrl(p.title, p.slug);
             return (
-              <Grid item xs={12} sm={6} md={4} lg={3} key={p.id}>
+              <Grid key={p.id} size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
                 <Card
                   sx={{
                     height: "100%",

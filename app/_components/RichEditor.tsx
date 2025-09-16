@@ -135,7 +135,7 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(function Inner(
     if (currentMd !== valueMd) {
       editor.commands.setContent(
         valueMd ? (marked.parse(valueMd) as string) : "",
-        false
+        { emitUpdate: false }
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
