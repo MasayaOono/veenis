@@ -2,8 +2,6 @@
 import { ImageResponse } from "next/og";
 
 export const runtime = "edge";
-export const alt = "OG Image";
-export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 function truncate(str: string, n = 80) {
@@ -35,6 +33,6 @@ export async function GET(req: Request) {
         {title}
       </div>
     ),
-    { ...size }
+    { width: 1200, height: 630 } // ← ここでサイズ指定
   );
 }
