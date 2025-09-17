@@ -1,6 +1,6 @@
 // app/me/edit/page.tsx
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import {
   Avatar,
@@ -16,16 +16,37 @@ import {
   Typography,
   Link,
   LinearProgress,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from "@mui/material";
 import NextLink from "next/link";
-import Grid from "@mui/material/Grid"; // v7: Grid v2（子は item 不要、size を使う）
+import Grid from "@mui/material/Grid"; // v7 Grid v2
 
 type Profile = {
   user_id: string;
   username: string | null;
   display_name: string | null;
   avatar_url: string | null;
+  job: string | null; // ★ 追加
 };
+
+// 美容系の職業プリセット
+const JOB_OPTIONS = [
+  "美容師",
+  "理容師",
+  "カラーリスト",
+  "アイリスト",
+  "ネイリスト",
+  "エステティシャン",
+  "セラピスト",
+  "メイクアップアーティスト",
+  "スパニスト",
+  "インストラクター/講師",
+  "サロンオーナー/マネージャー",
+  "その他",
+];
 
 export default function EditProfilePage() {
   const [uid, setUid] = useState<string | null>(null);
@@ -36,7 +57,26 @@ export default function EditProfilePage() {
 
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [avatarUrl, setAvatarUrl] = useState("");
+  const [job, setJob] = useState<string>(""); // ★ 追加
+
+  // 画像：既存URLと新規選択ファイル（保存時にだけアップロード）
+  const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string>("");
+  const [file, setFile] = useState<File | null>(null);
+  const previewUrl = useMemo(
+    () => (file ? URL.createObjectURL(file) : currentAvatarUrl || ""),
+    [file, currentAvatarUrl]
+  );
+  // blob URL 後片付け
+  const prevBlobRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (file && previewUrl.startsWith("blob:")) {
+      if (prevBlobRef.current) URL.revokeObjectURL(prevBlobRef.current);
+      prevBlobRef.current = previewUrl;
+    }
+    return () => {
+      if (prevBlobRef.current) URL.revokeObjectURL(prevBlobRef.current);
+    };
+  }, [previewUrl, file]);
 
   // 初期ロード
   useEffect(() => {
@@ -53,14 +93,16 @@ export default function EditProfilePage() {
 
       const { data: p, error: e2 } = await supabase
         .from("profiles")
-        .select("user_id, username, display_name, avatar_url")
+        .select("user_id, username, display_name, avatar_url, job")
         .eq("user_id", id)
         .maybeSingle();
       if (e2) setMessage(e2.message);
 
       setUsername((p?.username ?? "") as string);
       setDisplayName((p?.display_name ?? "") as string);
-      setAvatarUrl((p?.avatar_url ?? "") as string);
+      setCurrentAvatarUrl((p?.avatar_url ?? "") as string);
+      setJob((p?.job ?? "") as string);
+
       setLoading(false);
     })();
   }, []);
@@ -98,44 +140,46 @@ export default function EditProfilePage() {
     );
   };
 
-  // 保存
+  // 保存（ファイルがあればここでアップロード → URL を保存）
   const handleSave = async () => {
     if (!uid) return;
     if (errorUserName) return;
+
     setSaving(true);
-    const payload: Profile = {
-      user_id: uid,
-      username: username || null,
-      display_name: displayName || null,
-      avatar_url: avatarUrl || null,
-    };
-    const { error } = await supabase.from("profiles").upsert(payload);
-    setSaving(false);
-    setMessage(error ? error.message : "保存しました");
-  };
-
-  // 画像アップロード（public-images バケット / {uid}/...）
-  const onUploadAvatar = async (file: File) => {
-    if (!uid) return;
     try {
-      setSaving(true);
-      const ext = file.name.split(".").pop() || "webp";
-      const path = `${uid}/${crypto.randomUUID()}.${ext}`;
-      const { error: upErr } = await supabase.storage
-        .from("public-images")
-        .upload(path, file, {
-          upsert: false,
-          cacheControl: "3600",
-        });
-      if (upErr) throw upErr;
+      let finalAvatarUrl = currentAvatarUrl;
 
-      const { data } = supabase.storage
-        .from("public-images")
-        .getPublicUrl(path);
-      setAvatarUrl(data.publicUrl);
-      setMessage("アイコンをアップロードしました");
+      if (file) {
+        const ext = (file.name.split(".").pop() || "webp").toLowerCase();
+        const path = `${uid}/avatar-${Date.now()}.${ext}`;
+        const { error: upErr } = await supabase.storage
+          .from("public-images")
+          .upload(path, file, { upsert: false, cacheControl: "3600" });
+        if (upErr) throw upErr;
+
+        const { data } = supabase.storage
+          .from("public-images")
+          .getPublicUrl(path);
+        finalAvatarUrl = data.publicUrl;
+      }
+
+      const payload: Profile = {
+        user_id: uid,
+        username: username || null,
+        display_name: displayName || null,
+        avatar_url: finalAvatarUrl || null,
+        job: job || null, // ★ 追加
+      };
+
+      const { error } = await supabase.from("profiles").upsert(payload);
+      if (error) throw error;
+
+      // 反映＆一時ファイルクリア
+      setCurrentAvatarUrl(finalAvatarUrl);
+      setFile(null);
+      setMessage("保存しました");
     } catch (e: unknown) {
-      setMessage(e instanceof Error ? e.message : "アップロードに失敗しました");
+      setMessage(e instanceof Error ? e.message : "保存に失敗しました");
     } finally {
       setSaving(false);
     }
@@ -178,12 +222,24 @@ export default function EditProfilePage() {
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                 />
-                <TextField
-                  label="アイコンURL"
-                  value={avatarUrl}
-                  onChange={(e) => setAvatarUrl(e.target.value)}
-                  helperText="手動でURLを貼るか、右側のアップロードを使用できます"
-                />
+
+                {/* ★ 職業（Select） */}
+                <FormControl fullWidth>
+                  <InputLabel id="job-label">職業</InputLabel>
+                  <Select
+                    labelId="job-label"
+                    label="職業"
+                    value={job}
+                    onChange={(e) => setJob(e.target.value as string)}
+                  >
+                    {JOB_OPTIONS.map((opt) => (
+                      <MenuItem key={opt} value={opt}>
+                        {opt}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+
                 <Stack direction="row" spacing={1}>
                   <Button
                     variant="contained"
@@ -196,14 +252,19 @@ export default function EditProfilePage() {
                     キャンセル
                   </Button>
                 </Stack>
+
+                <Typography variant="caption" color="text.secondary">
+                  ※ アイコン画像は「選択」後、<b>保存時にアップロード</b>
+                  されます。
+                </Typography>
               </Stack>
             </Grid>
 
-            {/* 右カラム */}
+            {/* 右カラム：アイコン画像 */}
             <Grid size={{ xs: 12, md: 4 }}>
               <Stack spacing={1.5} alignItems="center">
                 <Avatar
-                  src={avatarUrl || undefined}
+                  src={previewUrl || undefined}
                   sx={{ width: 96, height: 96 }}
                 />
                 <Button
@@ -211,21 +272,22 @@ export default function EditProfilePage() {
                   variant="outlined"
                   disabled={!uid || saving}
                 >
-                  画像をアップロード
+                  アイコン画像を選択
                   <input
                     type="file"
                     accept="image/*"
                     hidden
                     onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) onUploadAvatar(f);
+                      const f = e.target.files?.[0] || null;
+                      if (f) setFile(f);
                     }}
                   />
                 </Button>
-                <Typography variant="caption" color="text.secondary">
-                  バケット: <code>public-images</code> / フォルダ:{" "}
-                  <code>{uid ?? "…"}</code>
-                </Typography>
+                {file && (
+                  <Typography variant="caption" color="text.secondary">
+                    選択中: {file.name}
+                  </Typography>
+                )}
               </Stack>
             </Grid>
           </Grid>

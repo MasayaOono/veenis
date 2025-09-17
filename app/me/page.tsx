@@ -1,6 +1,6 @@
 // app/me/page.tsx
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import {
   Avatar,
@@ -193,36 +193,64 @@ export default function MePage() {
     loadMine();
   }, []);
 
-  /** ===== グループ新着プレビュー =====
-   * 所属グループが 0 件なら「読み込みも表示もしない」。
-   * 所属がある場合のみ RPC を叩く。
-   */
+  // ★ MePage の loadGroupFeed 部分だけ置き換え
+
+  /** ===== グループ新着プレビュー ===== */
   useEffect(() => {
     const loadGroupFeed = async () => {
-      if (groupsCount === 0) {
-        setGroupPreview([]); // 何も表示しない
+      // 所属グループIDを集める
+      const groupIds = groups.map((g) => g.id);
+      if (groupIds.length === 0) {
+        setGroupPreview([]); // 所属なし → 何も表示しない
         return;
       }
-      // ★ ここは「グループ限定のみ」を返す RPC があればそちらを使うのが理想。
-      // ない場合は既存 list_posts を使いつつ、サーバー側で RLS により
-      // 所属グループ記事だけ可視になっている前提。
-      const { data, error } = await supabase.rpc("list_posts", {
-        p_q: null,
-        p_sort: "new",
-        p_limit: OVERVIEW_PREVIEW_LIMIT,
-        p_offset: 0,
-        // もしサーバー側が対応していれば:
-        // p_only_group: true
-      });
+
+      // visibility=group & group_id ∈ 所属グループ のみ
+      const { data, error } = await supabase
+        .from("posts")
+        .select(
+          `
+          id, title, slug, excerpt, cover_image_url, published_at, read_minutes,
+          author_id,
+          profiles:author_id ( username, display_name, avatar_url ),
+          post_likes(count)
+        `
+        )
+        .eq("is_published", true)
+        .eq("visibility", "group")
+        .in("group_id", groupIds)
+        .order("published_at", { ascending: false, nullsFirst: false })
+        .limit(OVERVIEW_PREVIEW_LIMIT);
+
       if (error) {
         setMsg(error.message);
         setGroupPreview([]);
         return;
       }
-      setGroupPreview((data ?? []) as FeedPost[]);
+
+      // 取得形を FeedPost に整形
+      const rows = (data ?? []).map((r: any) => ({
+        id: r.id,
+        title: r.title,
+        slug: r.slug,
+        excerpt: r.excerpt ?? "",
+        cover_image_url: r.cover_image_url ?? null,
+        published_at: r.published_at ?? null,
+        read_minutes: r.read_minutes ?? null,
+        author_id: r.author_id,
+        author_username: r.profiles?.username ?? null,
+        author_display_name: r.profiles?.display_name ?? null,
+        author_avatar_url: r.profiles?.avatar_url ?? null,
+        like_count: Array.isArray(r.post_likes)
+          ? r.post_likes[0]?.count ?? 0
+          : 0,
+      })) as FeedPost[];
+
+      setGroupPreview(rows);
     };
+
     loadGroupFeed();
-  }, [groupsCount]);
+  }, [groups]); // ★ groups（IDが入っている）を依存に
 
   /** ===== 表示ユーティリティ ===== */
   const visibilityChip = (v: MyPost["visibility"], is_published: boolean) => {

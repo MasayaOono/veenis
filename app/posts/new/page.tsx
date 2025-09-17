@@ -8,7 +8,6 @@ import {
   Box,
   Button,
   Stack,
-  TextField,
   Typography,
   Alert,
   MenuItem,
@@ -19,31 +18,37 @@ import {
   Link,
   IconButton,
   Paper,
-  Tabs,
-  Tab,
   Divider,
+  List,
+  ListItemButton,
+  ListItemText,
+  Tooltip,
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogContentText,
   DialogActions,
+  RadioGroup,
+  Radio,
+  FormControlLabel,
+  InputBase,
+  TextField,
 } from "@mui/material";
-import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
-import VisibilityIcon from "@mui/icons-material/Visibility";
-import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import NextLink from "next/link";
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
+import MenuBookIcon from "@mui/icons-material/MenuBook";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
+import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
+import TocIcon from "@mui/icons-material/Toc";
 import { supabase } from "@/lib/supabaseClient";
 import { slugify } from "@/utils/slugify";
 import type { RichEditorHandle } from "@/app/_components/RichEditor";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkBreaks from "remark-breaks";
 
 const RichEditor = dynamic(() => import("@/app/_components/RichEditor"), {
   ssr: false,
 });
 
 type Group = { id: string; name: string };
+type TocItem = { level: 1 | 2 | 3; text: string };
 
 function estimateReadMinutes(md: string) {
   const text = md.replace(/[`*_#>\-\[\]\(\)!\n\r]/g, "");
@@ -58,26 +63,7 @@ function randomBase64Url(bytes = 20) {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-// タイトル placeholder（大）
-const titlePlaceholderSx = {
-  "& .MuiInputBase-input::placeholder": {
-    opacity: 1,
-    fontWeight: 800,
-    fontSize: { xs: "1.3rem", sm: "1.6rem" },
-  },
-  "& .MuiInputBase-root": { py: { xs: 1.25, sm: 1.75 } },
-  "& .MuiInputBase-input": {
-    fontWeight: 800,
-    fontSize: { xs: "1.3rem", sm: "1.6rem" },
-    lineHeight: 1.25,
-  },
-};
-// タグ placeholder（通常）
-const normalPlaceholderSx = {
-  "& .MuiInputBase-input::placeholder": { opacity: 1, fontWeight: 700 },
-};
-
-/* ===== 記入例タブ（プロ向けテンプレ） ===== */
+/* ===== 記入例テンプレ（最小構成） ===== */
 const SAMPLES: { label: string; md: string }[] = [
   {
     label: "共通：カウンセリング雛形",
@@ -94,21 +80,6 @@ const SAMPLES: { label: string; md: string }[] = [
 - 直近履歴：＿＿＿＿（カラー/パーマ/縮毛/黒染め）
 - ホームケア：＿＿＿＿（頻度・アイテム）
 - 素材：太さ＿/量＿/ダメージ＿/癖＿/浮き＿/生えグセ＿
-
-## 3) リスク・禁忌
-- 皮膚刺激歴：無 / 有（部位＿/反応＿）
-- 注意薬剤：＿＿＿（例：過硫酸塩、シアノアクリレート等）
-- 施術NG：＿＿＿（理由）
-
-## 4) 施術方針（簡潔に）
-- メイン：＿＿＿＿（例：酸熱／中性矯正／ブリーチ1回）
-- 補助：＿＿＿＿（例：前処理PPT／バッファー）
-- 仕上げ：＿＿＿＿（例：90%ドライ→耐湿スプレー）
-
-## 5) アフター・次回来店
-- ホームケア：朝＿＿＿／夜＿＿＿／週1＿＿＿
-- 次回：＿＿週間後（目的：補正／色味調整／土台作り）
-- KPI：持ち＿＿週・再現時間＿＿分・満足度＿＿/10
 `,
   },
   {
@@ -118,190 +89,22 @@ const SAMPLES: { label: string; md: string }[] = [
 ## 目的・KPI
 - 目標明度：10〜11Lv／オレンジ残り最小
 - ダメージ指標：ウェット伸び＜5%、ドライ弾力維持
-
-## 設計
-- 薬剤：過硫酸塩系＋6%（根元4.5%）、プレックス1.5%
-- 粘度：耳上硬め、ネープ〜中間はやや緩め
-- ブロッキング：5分割、フェイスライン先行
-- 中間水洗：8–10分時点、pHバッファ 4.5
-
-## 進行
-1. 既染部先行→根元は5–8分遅らせ
-2. 浮きやすい部位にフィルム＋保温は局所のみ
-3. 中間水洗→再塗布（必要部位）
-
-## 仕上げ・トナー
-- 8:1:1（V/アッシュ：クリア：バッファ）5分
-- 乳化→酸リンス→ドライ前オイル
-
-## 注意・禁忌
-- 皮膚既往歴／薬剤滞留時間の上限管理
-- 黒染め履歴部に還元チェック→反応過多なら段階除去に切替
 `,
   },
   {
-    label: "ヘア：中性ストレート（くせ中〜強）",
+    label: "中性矯正（くせ中〜強）",
     md: `# 中性矯正プロトコル（ショート〜ミディアム）
 
 ## 素材評価
 - うねり：3/5　捻転：2/5　撥水：中
-- 既矯正：耳後ろのみ 6ヶ月前
-
-## 1剤
-- 中性〜微アルカリ pH6.8–7.2、GMT少量ブレンド
-- 塗布：生還元ゾーンに限定、既矯正部は油性バリア
-
-## 反応管理
-- 目視：面の乱反射→整列変化で判定
-- テスト：数本スルー時の伸び 20–30%
-
-## アイロン
-- 180–185℃、スルー1.5〜2回、テンション小さめ
-- 前髪・顔周りは面優先、角度管理
-
-## 2剤・後処理
-- ブロム酸→処理時間厳守→酸リンス→CMC補充
-
-## リスク管理
-- 既矯正部の重ねを避ける／前処理タンパク過多の脆化に注意
 `,
   },
   {
-    label: "ネイル：ワンカラー時短×持ち",
+    label: "ネイル：時短×持ち",
     md: `# ジェルワンカラー：時短&持ち最適化
 
 ## 所要・単価目安
 - 60分 / ¥¥¥　目標リピ率：85%
-
-## 工程
-1. プレパ（甘皮/サイドウォール）5–7分
-2. サンディング：180Gで均一、ダスト完全除去
-3. 脱脂→ベース薄塗り→硬化
-4. 2層色ムラ補正：1層目7割、2層目でエッジ形成
-5. トップ：フォルム整え、先端シーリング
-
-## 品質管理
-- 浮き率＜5%、リペア戻り率モニタ
-- 皮膚接触ゼロ、キューティクルライン0.5mm
-
-## 禁忌・対応
-- 緑膿菌疑い→即中止・医療案内
-- アレルギー反応→材料変更／パッチ推奨
-`,
-  },
-  {
-    label: "アイ：まつパ（ラッシュリフト）",
-    md: `# まつ毛パーマ：安定カール再現
-
-## 事前評価
-- 太さ：中　長さ：8–10mm　逆さまつ毛：軽度
-
-## 設計
-- ロッド：Cカール相当、インナー短め配置
-- 1剤：チオ系低刺激、塗布量は根元1/3メイン
-- 2剤：ブロム酸系、過収斂回避
-
-## 進行
-1. 皮膚保護→ロッド装着→テンション均一
-2. 1剤 8–10分、拭き取り完全→2剤 6–8分
-3. ブラッシング整列→乾燥→コーティング
-
-## リスク
-- ケミカル刺激歴／粘膜接触の回避
-- 左右差はロッド選定/塗布時間で微調整
-`,
-  },
-  {
-    label: "フェイシャル：毛穴×鎮静プロトコル",
-    md: `# フェイシャル：毛穴集中（角栓軟化→鎮静）
-
-## 禁忌確認
-- 強い炎症性ニキビ／レチノール高濃度使用中／皮膚科加療中
-
-## 流れ（60分）
-1. クレンジング→酵素洗浄（2–3分）
-2. スチーム5分（敏感肌はオフ）
-3. 超音波 or 吸引：低圧・短時間
-4. 鎮静パック（PCA/パンテノール）10分
-5. 導入（NA/B5）→保湿→UV
-
-## ホームケア指導
-- 酵素洗顔は週1、レチノール夜のみ、PA++++
-- 触らない・擦らない・温冷差に注意
-`,
-  },
-  {
-    label: "写真/SNS：撮影テンプレ",
-    md: `# 撮影テンプレ（再現可能な一枚）
-
-## 事前
-- 背景：無彩色、逆光回避、蛍光灯OFFで色被り防止
-- 構図：ビフォーは正対、アフターは3/4斜め
-
-## 設定
-- 露出−0.3〜−0.7、WBオート→微補正
-- ピント：前髪・艶のハイライトに
-
-## 投稿メモ
-- 1枚目：アフター（情報最小）
-- 2枚目：工程/使用剤
-- 3枚目：ホームケア提案と来店周期
-- ハッシュタグ：地域×メニュー×悩み＋2–3個で十分
-`,
-  },
-  {
-    label: "メニュー設計：単価UP（自然）",
-    md: `# 単価アップ設計（押し売りゼロ）
-
-## 入口単価→目標
-- 例）¥7,000 → ¥9,500（3ヶ月で）
-
-## バンドル例
-- カット＋質感補正トリート＋耐湿仕上げ（所要+10分）
-- ブリーチ系：前処理PPT＋中間水洗＋プレックス
-
-## トークの順序
-1. 悩みの再定義（数字化）→ 2. 体験提案（試すだけ） → 3. 家でも再現できる道筋提示
-
-## 指標
-- 客単価、セット率、次回予約率、返品率
-`,
-  },
-  {
-    label: "キャンペーン運用：在庫×集客",
-    md: `# 月次キャンペーン運用（在庫連動）
-
-## 目標
-- リピ客の来店周期短縮／ホームケア導入率UP
-
-## 企画例
-- 梅雨：耐湿ライン体験セット（ミニ＋施術バンドル）
-- ブリーチ月：紫シャンプー2本目割
-
-## 運用
-- 既存客LINE：告知→2回目リマインド（来店10日前）
-- SNS：前後比較の“結果”を1枚目に
-- 在庫閾値：残15でポップ作成→残8でストーリー告知
-
-## 効果測定
-- 同月対比：客単価／再来率／在庫回転
-`,
-  },
-  {
-    label: "リスク&衛生チェックリスト",
-    md: `# リスク・衛生チェック（毎日運用）
-
-## 衛生
-- 金属/刃物：超音波洗浄→消毒→乾燥→密閉
-- タオル：使用区画分け、湿庫内温湿度ログ
-
-## 化学薬剤
-- ロット/開封日記録、アレルゲン掲示
-- MSDS管理と避難経路周知
-
-## 事故対応
-- 皮膚刺激：即時中止→洗浄→冷却→記録→連絡
-- 目入：洗眼→医療連携→報告書
 `,
   },
 ];
@@ -316,13 +119,7 @@ export default function NewPostPage() {
 
   // form
   const [title, setTitle] = useState("");
-  const [body, setBody] = useState(""); // 本文Markdown
-  const [visibility, setVisibility] = useState<
-    "draft" | "public" | "group" | "link"
-  >("draft");
-  const [groupId, setGroupId] = useState<string>("");
-
-  // タグ
+  const [body, setBody] = useState("");
   const [tagsInput, setTagsInput] = useState("");
   const tags = useMemo(
     () =>
@@ -337,7 +134,7 @@ export default function NewPostPage() {
     [tagsInput]
   );
 
-  // カバー画像
+  // カバー
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
 
@@ -345,18 +142,24 @@ export default function NewPostPage() {
   const [err, setErr] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
-  // 記入例タブ & 右ペイン開閉
-  const [sampleIdx, setSampleIdx] = useState(0);
-  const [rightOpen, setRightOpen] = useState(true);
-  const currentSample = SAMPLES[sampleIdx]?.md ?? "";
+  // サイドメニュー：初期は開いた状態（目次）
+  const [menuExpanded, setMenuExpanded] = useState(true);
+  const [panelMode, setPanelMode] = useState<"toc" | "tpl">("toc");
 
-  // 挿入確認ダイアログ
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [pendingSampleMd, setPendingSampleMd] = useState<string | null>(null);
+  // 上書き確認（テンプレ挿入）
+  const [confirmOverwriteOpen, setConfirmOverwriteOpen] = useState(false);
+  const pendingInsertMdRef = useRef<string | null>(null);
 
-  // auth required + groups
+  // 公開ダイアログ
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [visDraft, setVisDraft] = useState<
+    "draft" | "public" | "group" | "link"
+  >("draft");
+  const [groupId, setGroupId] = useState<string>("");
+
+  // 認証＋所属グループ
   useEffect(() => {
-    const init = async () => {
+    (async () => {
       const { data } = await supabase.auth.getUser();
       const u = data.user;
       if (!u) {
@@ -376,11 +179,10 @@ export default function NewPostPage() {
           .in("id", ids);
         setGroups((gs ?? []) as Group[]);
       }
-    };
-    init();
+    })();
   }, [router]);
 
-  // ストレージアップロード共通
+  // ストレージ共通
   const uploadToSupabase = async (file: File) => {
     const { data: me } = await supabase.auth.getUser();
     const userId = me?.user?.id;
@@ -402,7 +204,7 @@ export default function NewPostPage() {
     return pub.publicUrl;
   };
 
-  // カバー画像ハンドラ
+  // カバー画像
   const handlePickCover = () => coverInputRef.current?.click();
   const handleCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -418,43 +220,24 @@ export default function NewPostPage() {
     if (coverInputRef.current) coverInputRef.current.value = "";
   };
 
-  // 記入例挿入（上書き）フロー
-  const requestInsertSample = (md: string) => {
-    if (body.trim().length === 0) {
-      setBody(md);
-      return;
-    }
-    setPendingSampleMd(md);
-    setConfirmOpen(true);
-  };
-  const confirmOverwrite = () => {
-    if (pendingSampleMd != null) setBody(pendingSampleMd);
-    setPendingSampleMd(null);
-    setConfirmOpen(false);
-  };
-  const cancelOverwrite = () => {
-    setPendingSampleMd(null);
-    setConfirmOpen(false);
-  };
-
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // ===== 投稿保存ロジック =====
+  const doSubmit = async () => {
     setErr(null);
     setInfo(null);
     if (!uid) return;
-    if (visibility === "group" && !groupId) {
+
+    if (visDraft === "group" && !groupId) {
       setErr("グループ限定公開を選択した場合は、グループを選んでください。");
       return;
     }
     setSaving(true);
 
-    // 本文の一時画像アップロード & 置換
     const finalMd =
       (await editorRef.current?.exportMarkdownWithUploads(uploadToSupabase)) ??
       body;
     const readMinutes = estimateReadMinutes(finalMd);
 
-    // カバー画像アップロード（任意）
+    // カバー画像アップロード
     let coverUrl: string | null = null;
     if (coverFile) {
       try {
@@ -468,8 +251,8 @@ export default function NewPostPage() {
 
     let slug = slugify(title || "untitled");
     const baseInsert = async () => {
-      const isPublished = visibility !== "draft";
-      const linkToken = visibility === "link" ? randomBase64Url(20) : null;
+      const isPublished = visDraft !== "draft";
+      const linkToken = visDraft === "link" ? randomBase64Url(20) : null;
       const { data, error } = await supabase
         .from("posts")
         .insert({
@@ -478,9 +261,9 @@ export default function NewPostPage() {
           slug,
           body_md: finalMd,
           cover_image_url: coverUrl,
-          visibility,
+          visibility: visDraft,
           link_token: linkToken,
-          group_id: visibility === "group" ? groupId : null,
+          group_id: visDraft === "group" ? groupId : null,
           is_published: isPublished,
           read_minutes: readMinutes,
           published_at: isPublished ? new Date().toISOString() : null,
@@ -501,7 +284,7 @@ export default function NewPostPage() {
       return;
     }
 
-    // タグ反映
+    // タグ反映（任意）
     if (tags.length) {
       const { error: tagErr } = await supabase.rpc("upsert_post_tags", {
         p_post_id: data!.id,
@@ -514,8 +297,9 @@ export default function NewPostPage() {
     }
 
     setSaving(false);
+    setPublishOpen(false);
 
-    if (visibility === "link") {
+    if (visDraft === "link") {
       const share = `${window.location.origin}/posts/${data!.slug}?token=${
         data!.link_token
       }`;
@@ -526,63 +310,363 @@ export default function NewPostPage() {
     }
   };
 
+  // ===== 目次（Markdown → H1〜H3 抽出） =====
+  const toc: TocItem[] = useMemo(() => {
+    const out: TocItem[] = [];
+    const re = /^(#{1,3})\s+(.+?)\s*$/gm;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(body))) {
+      const level = m[1].length as 1 | 2 | 3;
+      const text = m[2].replace(/[#*_`]/g, "").trim();
+      out.push({ level, text });
+    }
+    return out;
+  }, [body]);
+
+  const scrollToHeading = (idx: number) => {
+    const root = document.querySelector(
+      ".tiptap-content"
+    ) as HTMLElement | null;
+    if (!root) return;
+    const els = Array.from(
+      root.querySelectorAll("h1, h2, h3")
+    ) as HTMLElement[];
+    const el = els[idx];
+    if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+  };
+
+  // ===== テンプレ挿入 =====
+  const tryInsertTemplate = (md: string) => {
+    if (body.trim().length === 0) {
+      setBody(md);
+      return;
+    }
+    pendingInsertMdRef.current = md;
+    setConfirmOverwriteOpen(true);
+  };
+  const confirmOverwrite = () => {
+    if (pendingInsertMdRef.current) {
+      setBody(pendingInsertMdRef.current);
+      pendingInsertMdRef.current = null;
+    }
+    setConfirmOverwriteOpen(false);
+  };
+
+  // ===== レイアウト寸法 =====
+  const railW = 72;
+  const paneW = 300;
+  const editorMax = 780;
+  const sideW = menuExpanded ? railW + paneW : railW;
   return (
-    <Box
-      sx={{
-        width: "100%",
-        mx: "auto",
-        "& .MuiOutlinedInput-root": { borderRadius: 4 },
-        "& .MuiOutlinedInput-root fieldset": { borderRadius: 4 },
-      }}
-    >
-      <form onSubmit={onSubmit}>
-        <Stack spacing={2}>
-          {/* タイトル */}
-          <TextField
-            fullWidth
-            label="タイトル"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="例）くせ毛向けドライヤーの選び方とプロの推し3選"
-            required
-            sx={titlePlaceholderSx}
-          />
+    <Box sx={{ position: "relative" }}>
+      {/* グリッド：左サイド（ハンバーガー風） + 右メイン */}
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: `${sideW}px 1fr`,
+          gap: 2,
+          transition: "grid-template-columns .2s ease",
+          alignItems: "start",
+        }}
+      >
+        {/* === 左サイド（縦アイコンレール + 右にカード） === */}
+        <Box
+          sx={{
+            position: "sticky",
+            top: 88,
+            height: "calc(100dvh - 136px)",
+            display: "grid",
+            gridTemplateColumns: `${railW}px ${menuExpanded ? paneW : 0}px`,
+            gap: 1,
+            transition: "grid-template-columns .2s ease",
+          }}
+        >
+          {/* 縦アイコンのレール（常時表示） */}
+          <Paper
+            variant="outlined"
+            sx={{
+              height: "100%",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              py: 1,
+              bgcolor: "rgba(255,255,255,0.7)",
+              backdropFilter: "saturate(180%) blur(12px)",
+            }}
+          >
+            <Tooltip title="目次" placement="right">
+              <IconButton
+                size="small"
+                color={
+                  panelMode === "toc" && menuExpanded ? "primary" : "default"
+                }
+                onClick={() => {
+                  setPanelMode("toc");
+                  setMenuExpanded(true);
+                }}
+                sx={{ mb: 1 }}
+              >
+                <TocIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
 
-          {/* タグ */}
-          <TextField
-            fullWidth
-            label="タグ（カンマ or スペース区切り）"
-            value={tagsInput}
-            onChange={(e) => setTagsInput(e.target.value)}
-            placeholder="例）ドライヤー くせ毛 速乾 サロンワーク"
-            sx={normalPlaceholderSx}
-          />
-          {tags.length > 0 && (
-            <Stack direction="row" flexWrap="wrap" gap={1}>
-              {tags.map((t) => (
-                <Chip key={t} label={t} />
-              ))}
-            </Stack>
-          )}
+            <Tooltip title="テンプレート" placement="right">
+              <IconButton
+                size="small"
+                color={
+                  panelMode === "tpl" && menuExpanded ? "primary" : "default"
+                }
+                onClick={() => {
+                  setPanelMode("tpl");
+                  setMenuExpanded(true);
+                }}
+              >
+                <MenuBookIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Paper>
 
-          {/* 公開設定 */}
-          <FormControl fullWidth>
-            <InputLabel id="vis-label">公開方法</InputLabel>
-            <Select
-              labelId="vis-label"
-              label="公開方法"
-              value={visibility}
-              onChange={(e) => setVisibility(e.target.value as any)}
+          {/* 右のカード（開いたときだけ表示） */}
+          {menuExpanded && (
+            <Paper
+              variant="outlined"
+              sx={{
+                height: "100%",
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                bgcolor: "rgba(255,255,255,0.7)",
+                backdropFilter: "saturate(180%) blur(12px)",
+              }}
             >
-              <MenuItem value="draft">下書き（非公開）</MenuItem>
-              <MenuItem value="public">完全公開</MenuItem>
-              <MenuItem value="group">グループ限定</MenuItem>
-              <MenuItem value="link">リンク限定公開</MenuItem>
-            </Select>
-          </FormControl>
+              {/* ヘッダー：タイトル + 右上「閉じる」 */}
+              <Stack
+                direction="row"
+                alignItems="center"
+                justifyContent="space-between"
+                sx={{ p: 1 }}
+              >
+                <Typography variant="subtitle2" color="text.secondary">
+                  {panelMode === "toc" ? "目次" : "テンプレート"}
+                </Typography>
+                <Tooltip title="閉じる">
+                  <IconButton
+                    size="small"
+                    onClick={() => setMenuExpanded(false)}
+                  >
+                    <ChevronLeftIcon />
+                  </IconButton>
+                </Tooltip>
+              </Stack>
 
-          {visibility === "group" && (
-            <FormControl fullWidth>
+              <Divider />
+
+              {/* 中身 */}
+              <Box sx={{ flex: 1, overflow: "auto" }}>
+                {panelMode === "toc" ? (
+                  // 目次：見出しテキストをそのまま表示
+                  <List dense sx={{ py: 0.5 }}>
+                    {toc.length === 0 && (
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{ px: 2, py: 1 }}
+                      >
+                        見出し（# / ## / ###）を入力すると目次が表示されます
+                      </Typography>
+                    )}
+                    {toc.map((t, idx) => (
+                      <ListItemButton
+                        key={`${t.level}-${idx}-${t.text}`}
+                        onClick={() => scrollToHeading(idx)}
+                        sx={{
+                          pl: t.level === 1 ? 1.5 : t.level === 2 ? 3 : 4.5,
+                          py: 0.75,
+                        }}
+                      >
+                        <ListItemText
+                          primary={t.text}
+                          primaryTypographyProps={{
+                            noWrap: true,
+                            title: t.text,
+                            fontSize:
+                              t.level === 1
+                                ? "0.95rem"
+                                : t.level === 2
+                                ? "0.9rem"
+                                : "0.85rem",
+                            fontWeight: t.level === 1 ? 700 : 500,
+                          }}
+                        />
+                      </ListItemButton>
+                    ))}
+                  </List>
+                ) : (
+                  // テンプレ：ラベル + 「挿入」ボタンのみ
+                  <List dense sx={{ py: 0.5 }}>
+                    {SAMPLES.map((s) => (
+                      <ListItemButton
+                        key={s.label}
+                        disableRipple
+                        sx={{
+                          display: "grid",
+                          gridTemplateColumns: "1fr auto",
+                          alignItems: "center",
+                          columnGap: 1,
+                          py: 0.75,
+                          cursor: "default",
+                        }}
+                      >
+                        <ListItemText
+                          primary={s.label}
+                          primaryTypographyProps={{
+                            noWrap: true,
+                            title: s.label,
+                          }}
+                        />
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => tryInsertTemplate(s.md)}
+                        >
+                          挿入
+                        </Button>
+                      </ListItemButton>
+                    ))}
+                  </List>
+                )}
+              </Box>
+            </Paper>
+          )}
+        </Box>
+
+        {/* === 右メイン（タイトル + エディタ） === */}
+        <Box>
+          {/* 操作バー */}
+          <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 1 }}>
+            <Box sx={{ flex: 1 }} />
+            <Typography variant="body2" color="text.secondary">
+              読了目安: {estimateReadMinutes(body)} 分
+            </Typography>
+            <Button
+              variant="contained"
+              onClick={() => setPublishOpen(true)}
+              disabled={saving || !title || !body}
+            >
+              保存 / 公開
+            </Button>
+            <Link component={NextLink} href="/posts">
+              一覧へ戻る
+            </Link>
+          </Stack>
+
+          {/* タイトル（枠線なし） */}
+          <Box sx={{ mb: 1.5, display: "flex", justifyContent: "center" }}>
+            <InputBase
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="タイトルを入力"
+              inputProps={{ "aria-label": "title" }}
+              sx={{
+                width: "100%",
+                maxWidth: editorMax,
+                fontWeight: 800,
+                fontSize: { xs: "1.4rem", sm: "1.8rem" },
+                lineHeight: 1.25,
+                px: 0,
+                py: 1,
+                border: "none",
+                outline: "none",
+                "& input": { border: "none", outline: "none" },
+                background: "transparent",
+              }}
+            />
+          </Box>
+
+          {/* 本文 */}
+          <Box sx={{ display: "flex", justifyContent: "center" }}>
+            <Box sx={{ width: "100%", maxWidth: editorMax }}>
+              <RichEditor
+                ref={editorRef}
+                valueMd={body}
+                onChangeMd={setBody}
+                placeholder="大見出し、引用、リスト、画像、リンクに対応。画像は保存時に自動アップロードされます。"
+              />
+            </Box>
+          </Box>
+
+          {err && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {err}
+            </Alert>
+          )}
+          {info && (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              {info}
+            </Alert>
+          )}
+        </Box>
+      </Box>
+
+      {/* 上書き警告（テンプレ挿入時） */}
+      <Dialog
+        open={confirmOverwriteOpen}
+        onClose={() => setConfirmOverwriteOpen(false)}
+      >
+        <DialogTitle>本文を上書きします</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            現在の本文は消えて、選択したテンプレート内容に置き換わります。よろしいですか？
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmOverwriteOpen(false)}>
+            キャンセル
+          </Button>
+          <Button color="error" variant="contained" onClick={confirmOverwrite}>
+            上書きする
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 公開方法 + タグ + カバー画像（ダイアログ内） */}
+      <Dialog
+        open={publishOpen}
+        onClose={() => setPublishOpen(false)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>公開方法を選択</DialogTitle>
+        <DialogContent>
+          <RadioGroup
+            value={visDraft}
+            onChange={(e) => setVisDraft(e.target.value as any)}
+            sx={{ mt: 1 }}
+          >
+            <FormControlLabel
+              value="draft"
+              control={<Radio />}
+              label="下書き（非公開）"
+            />
+            <FormControlLabel
+              value="public"
+              control={<Radio />}
+              label="完全公開"
+            />
+            <FormControlLabel
+              value="link"
+              control={<Radio />}
+              label="リンク限定公開"
+            />
+            <FormControlLabel
+              value="group"
+              control={<Radio />}
+              label="グループ限定公開"
+            />
+          </RadioGroup>
+
+          {visDraft === "group" && (
+            <FormControl fullWidth sx={{ mt: 2 }}>
               <InputLabel id="grp-label">対象グループ</InputLabel>
               <Select
                 labelId="grp-label"
@@ -599,19 +683,36 @@ export default function NewPostPage() {
             </FormControl>
           )}
 
+          {/* タグ */}
+          <Box sx={{ mt: 2 }}>
+            <TextField
+              fullWidth
+              label="タグ（カンマ or スペース区切り）"
+              value={tagsInput}
+              onChange={(e) => setTagsInput(e.target.value)}
+              placeholder="例）ドライヤー くせ毛 速乾 サロンワーク"
+            />
+            {tags.length > 0 && (
+              <Stack direction="row" flexWrap="wrap" gap={1} sx={{ mt: 1 }}>
+                {tags.map((t) => (
+                  <Chip key={t} label={t} />
+                ))}
+              </Stack>
+            )}
+          </Box>
+
           {/* カバー画像 */}
-          <Box>
+          <Box sx={{ mt: 3 }}>
             <Typography variant="subtitle2" color="text.secondary" gutterBottom>
               カバー画像（任意）
             </Typography>
-
             {coverPreview ? (
               <Paper
                 variant="outlined"
                 sx={{
                   position: "relative",
                   overflow: "hidden",
-                  borderRadius: 4,
+                  borderRadius: 2,
                 }}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -621,7 +722,7 @@ export default function NewPostPage() {
                   style={{
                     width: "100%",
                     display: "block",
-                    maxHeight: 420,
+                    maxHeight: 320,
                     objectFit: "cover",
                   }}
                 />
@@ -646,7 +747,6 @@ export default function NewPostPage() {
                 カバー画像を選択
               </Button>
             )}
-
             <input
               ref={coverInputRef}
               type="file"
@@ -656,237 +756,18 @@ export default function NewPostPage() {
             />
           </Box>
 
-          {/* 右ペイン開閉トグル */}
-          <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
-            <Button
-              size="small"
-              startIcon={rightOpen ? <VisibilityOffIcon /> : <VisibilityIcon />}
-              onClick={() => setRightOpen((v) => !v)}
-            >
-              記入例を{rightOpen ? "閉じる" : "開く"}
-            </Button>
-          </Box>
-
-          {/* 本文：左 / 記入例：右（右は sticky 追従 + 内部スクロール） */}
-          <Box
-            sx={{
-              display: "grid",
-              gap: 2,
-              gridTemplateColumns: rightOpen
-                ? { xs: "1fr", md: "minmax(0,1fr) minmax(0,1fr)" } // 完全1:1（押し出され防止）
-                : { xs: "1fr", md: "minmax(0,1fr)" },
-              alignItems: "start",
-            }}
-          >
-            {/* 左：エディタ */}
-            <Box sx={{ width: "100%", minWidth: 0 }}>
-              <RichEditor
-                ref={editorRef}
-                valueMd={body}
-                onChangeMd={setBody}
-                placeholder="大見出し、引用、リスト、画像、リンクに対応。画像は保存時に自動アップロードされます。"
-              />
-              <Stack
-                direction="row"
-                alignItems="center"
-                spacing={2}
-                sx={{ mt: 1 }}
-              >
-                <Button
-                  type="submit"
-                  variant="contained"
-                  disabled={saving || !title || !body}
-                >
-                  保存
-                </Button>
-                <Typography variant="body2" color="text.secondary">
-                  目安読了時間: {estimateReadMinutes(body)} 分
-                </Typography>
-              </Stack>
-            </Box>
-
-            {/* 右：記入例（sticky 追従 + 内部スクロール） */}
-            {rightOpen && (
-              <Box
-                sx={{
-                  position: { md: "sticky" },
-                  top: { xs: 0, md: 88 }, // ヘッダー分オフセット（必要なら調整）
-                  alignSelf: "flex-start",
-                  height: {
-                    md: "calc(100vh - 88px - 16px)", // 画面高 - ヘッダー - 余白
-                  },
-                }}
-              >
-                <Paper
-                  variant="outlined"
-                  sx={{
-                    p: 0,
-                    minWidth: 0,
-                    height: { md: "100%" },
-                    display: "flex",
-                    flexDirection: "column",
-                  }}
-                >
-                  <Tabs
-                    value={sampleIdx}
-                    onChange={(_, v) => setSampleIdx(v)}
-                    variant="scrollable"
-                    scrollButtons="auto"
-                  >
-                    {SAMPLES.map((s, i) => (
-                      <Tab key={i} label={s.label} />
-                    ))}
-                  </Tabs>
-
-                  {/* 内部スクロール領域 */}
-                  <Box sx={{ p: 2, flex: 1, overflow: "auto" }}>
-                    <Stack
-                      direction="row"
-                      alignItems="center"
-                      justifyContent="space-between"
-                      sx={{ mb: 1 }}
-                    >
-                      <Typography variant="subtitle2" color="text.secondary">
-                        記入例プレビュー
-                      </Typography>
-                      <Button
-                        size="small"
-                        onClick={() => requestInsertSample(currentSample)}
-                      >
-                        この例を挿入（上書き）
-                      </Button>
-                    </Stack>
-
-                    <Box
-                      className="article-body"
-                      sx={{
-                        fontSize: "0.95rem",
-                        "& img": { maxWidth: "100%", height: "auto" },
-                      }}
-                    >
-                      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
-                        {currentSample}
-                      </ReactMarkdown>
-                    </Box>
-
-                    <Divider sx={{ my: 2 }} />
-
-                    {/* 執筆アドバイス（読み物のみ） */}
-                    <Box>
-                      <Typography variant="subtitle2" gutterBottom>
-                        執筆アドバイス
-                      </Typography>
-
-                      <Stack
-                        direction="row"
-                        spacing={1}
-                        alignItems="center"
-                        sx={{ mb: 1 }}
-                      >
-                        <Chip
-                          size="small"
-                          label={`現在の目安読了 ${estimateReadMinutes(
-                            body
-                          )}分`}
-                        />
-                        <Chip
-                          size="small"
-                          variant="outlined"
-                          label={(() => {
-                            const m = estimateReadMinutes(body);
-                            if (m <= 2) return "短時間でサクッと読みたい人向け";
-                            if (m <= 5)
-                              return "通勤・待ち時間の読者に届きやすい";
-                            if (m <= 8) return "比較・検討層に刺さるボリューム";
-                            return "長文：章立て・目次・冒頭要約を";
-                          })()}
-                        />
-                      </Stack>
-
-                      <Stack component="ul" sx={{ pl: 2, m: 0 }} spacing={1}>
-                        <Typography component="li" variant="body2">
-                          冒頭2〜3行で「<b>誰の・どんな悩みが・どう解決</b>
-                          するか」を明示。
-                        </Typography>
-                        <Typography component="li" variant="body2">
-                          セクションは <b>H2主体</b>・<b>3〜6行</b>
-                          で小分け、空行で呼吸を作る。
-                        </Typography>
-                        <Typography component="li" variant="body2">
-                          箇条書きは各行に<b>太字キーワード</b>を1つだけ。
-                        </Typography>
-                        <Typography component="li" variant="body2">
-                          施術記事は<b>所要時間・持ち・頻度</b>
-                          を明記。ホームケアは<b>今日から3手順</b>に。
-                        </Typography>
-                        <Typography component="li" variant="body2">
-                          写真は横長1200px目安。<b>ビフォー→工程→アフター</b>
-                          で説得力UP。
-                        </Typography>
-                        <Typography component="li" variant="body2">
-                          3分超は<b>冒頭要約（3行）</b>と<b>目次</b>で離脱防止。
-                        </Typography>
-                      </Stack>
-
-                      <Divider sx={{ my: 1.5 }} />
-
-                      <Typography
-                        variant="body2"
-                        color="text.secondary"
-                        sx={{ mb: 0.5 }}
-                      >
-                        目安ボリューム：
-                      </Typography>
-                      <Stack direction="row" flexWrap="wrap" gap={1}>
-                        <Chip
-                          size="small"
-                          variant="outlined"
-                          label="2〜4分：お役立ちTips/告知"
-                        />
-                        <Chip
-                          size="small"
-                          variant="outlined"
-                          label="5〜7分：比較・完全ガイド"
-                        />
-                        <Chip
-                          size="small"
-                          variant="outlined"
-                          label="8分〜：特集・深掘り（要目次）"
-                        />
-                      </Stack>
-                    </Box>
-                  </Box>
-                </Paper>
-              </Box>
-            )}
-          </Box>
-
-          {err && <Alert severity="error">{err}</Alert>}
-          {info && <Alert severity="info">{info}</Alert>}
-
-          <Stack direction="row" gap={2} alignItems="center" flexWrap="wrap">
-            <Box sx={{ flex: 1 }} />
-            <Link component={NextLink} href="/posts">
-              一覧へ戻る
-            </Link>
-          </Stack>
-        </Stack>
-      </form>
-
-      {/* 記入例上書き確認 */}
-      <Dialog open={confirmOpen} onClose={cancelOverwrite}>
-        <DialogTitle>記入例を上書き挿入しますか？</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            現在の本文は<strong>記入例で置き換え</strong>
-            られます。元に戻す場合は
-            <kbd>Ctrl/⌘ + Z</kbd> で取り消せます。
-          </DialogContentText>
+          <Alert severity="info" sx={{ mt: 3 }}>
+            リンク限定はURLを知っている人だけが閲覧できます。作成後、共有URLを自動でコピーします。
+          </Alert>
         </DialogContent>
         <DialogActions>
-          <Button onClick={cancelOverwrite}>キャンセル</Button>
-          <Button onClick={confirmOverwrite} color="error" variant="contained">
-            上書きする
+          <Button onClick={() => setPublishOpen(false)}>戻る</Button>
+          <Button
+            onClick={doSubmit}
+            variant="contained"
+            disabled={saving || (visDraft === "group" && !groupId)}
+          >
+            {visDraft === "draft" ? "下書き保存" : "公開する"}
           </Button>
         </DialogActions>
       </Dialog>
