@@ -258,8 +258,7 @@ export default function EditPostPage() {
   };
 
   // カバー画像選択
-  const handlePickCover = (ref: React.RefObject<HTMLInputElement>) =>
-    ref.current?.click();
+  const handlePickCover = () => coverInputRef.current?.click();
   const handleCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -779,10 +778,7 @@ export default function EditPostPage() {
                 </IconButton>
               </Paper>
             ) : (
-              <Button
-                variant="outlined"
-                onClick={() => handlePickCover(coverInputRef)}
-              >
+              <Button variant="outlined" onClick={() => handlePickCover()}>
                 カバー画像を選択
               </Button>
             )}

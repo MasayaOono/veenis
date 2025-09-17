@@ -3,36 +3,40 @@ import type { Metadata, ResolvingMetadata } from "next";
 import ClientPostPage from "./ClientPostPage";
 import { createClient } from "@supabase/supabase-js";
 
-type Props = {
-  params: { slug: string };
-  searchParams?: Record<string, string | string[] | undefined>;
-};
+type Params = { slug: string };
+type Search = Record<string, string | string[] | undefined> | undefined;
 
-const stripMd = (md: string) =>
-  (md || "")
-    .replace(/```[\s\S]*?```/g, "") // fenced code block
-    .replace(/`[^`]*`/g, "") // inline code
-    .replace(/!\[[^\]]*\]\([^)]+\)/g, "") // images
-    .replace(/\[[^\]]*\]\([^)]+\)/g, "") // links
-    .replace(/[>#*_~]/g, "") // md marks（※ハイフンは残す）
-    .replace(/\n+/g, " ")
-    .trim();
-
-// ※ サーバーで使うだけなら anon でもOK（RLSの範囲内）
-//   ただし ISR/SSG で安定させたいなら server client を使う設計も検討してね
+// server-side supabase（anonでRLS内アクセス）
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+const stripMd = (md: string) =>
+  (md || "")
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`[^`]*`/g, "")
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
+    .replace(/\[[^\]]*\]\([^)]+\)/g, "")
+    .replace(/[>#*_~]/g, "")
+    .replace(/\n+/g, " ")
+    .trim();
+
+// ★ ここがポイント：params / searchParams は Promise を受け取り await する
 export async function generateMetadata(
-  { params, searchParams }: Props,
+  {
+    params,
+    searchParams,
+  }: {
+    params: Promise<Params>;
+    searchParams: Promise<Search>;
+  },
   _parent: ResolvingMetadata
 ): Promise<Metadata> {
-  const { slug } = params;
+  const { slug } = await params;
+  const sp = await searchParams;
 
-  // token を安全に取り出す（?token=... or ?token[]=... どちらでもOK）
-  const tokenMaybe = searchParams?.token;
+  const tokenMaybe = sp?.token;
   const token = Array.isArray(tokenMaybe)
     ? tokenMaybe[0]
     : tokenMaybe ?? undefined;
@@ -93,6 +97,6 @@ export async function generateMetadata(
 }
 
 export default function Page() {
-  // 表示はクライアント側に委譲
+  // 表示はクライアントに委譲
   return <ClientPostPage />;
 }
