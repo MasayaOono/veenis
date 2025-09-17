@@ -68,7 +68,7 @@ export async function generateMetadata(
 
   const base =
     process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
-    "http://localhost:3000";
+    "https://veenis.vercel.app";
   const canonical = `${base}/posts/${encodeURIComponent(post.slug)}${
     token ? `?token=${encodeURIComponent(token)}` : ""
   }`;
