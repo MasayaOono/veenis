@@ -1,4 +1,6 @@
+// app/posts/[slug]/page.tsx
 import type { Metadata, ResolvingMetadata } from "next";
+import { headers } from "next/headers";
 import ClientPostPage from "./ClientPostPage";
 import { createClient } from "@supabase/supabase-js";
 
@@ -10,14 +12,25 @@ const supabase = createClient(
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+type GenMetaProps = {
+  params: Promise<{ slug: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+const stripMd = (md: string) =>
+  (md || "")
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`[^`]*`/g, "")
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
+    .replace(/\[[^\]]*\]\([^)]+\)/g, "")
+    .replace(/[#>*_~>-]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
 export async function generateMetadata(
-  props: {
-    params: Promise<{ slug: string }>;
-    searchParams?: Promise<Record<string, string | string[] | undefined>>;
-  },
+  props: GenMetaProps,
   _res: ResolvingMetadata
 ): Promise<Metadata> {
-  // ★ Promise を剥がす
   const { slug } = await props.params;
   const sp = (props.searchParams ? await props.searchParams : {}) || {};
   const tokenRaw = sp["token"];
@@ -27,6 +40,12 @@ export async function generateMetadata(
       : Array.isArray(tokenRaw)
       ? tokenRaw[0]
       : undefined;
+
+  // ★ リクエストヘッダからホスト/プロトコルを決定（貼り付け先ドメインと一致させる）
+  const h = await headers();
+  const host = h.get("x-forwarded-host") || h.get("host") || "localhost:3000";
+  const proto = h.get("x-forwarded-proto") || "https";
+  const site = `${proto}://${host}`;
 
   // 記事取得
   let post: any = null;
@@ -47,27 +66,18 @@ export async function generateMetadata(
 
   if (!post) return { title: "記事が見つかりませんでした" };
 
-  const site =
-    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
-    "https://veenis.vercel.app";
-
   const title = post.title ?? "記事";
-  const desc =
-    (post.body_md ?? "")
-      .replace(/```[\s\S]*?```/g, "")
-      .replace(/`[^`]*`/g, "")
-      .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
-      .replace(/\[[^\]]*\]\([^)]+\)/g, "")
-      .replace(/[#>*_~>-]/g, "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 120) || "記事のプレビュー";
+  const desc = stripMd(post.body_md ?? "").slice(0, 120) || "記事のプレビュー";
 
   const canonical = `${site}/posts/${encodeURIComponent(post.slug)}${
     token ? `?token=${encodeURIComponent(token)}` : ""
   }`;
-  const ogImage =
-    post.cover_image_url || `${site}/api/og?title=${encodeURIComponent(title)}`;
+
+  // ★ カバー画像があればそれ、無ければ “このページ専用のOG画像ルート” を使う
+  const fallbackOg = `${site}/posts/${encodeURIComponent(
+    post.slug
+  )}/opengraph-image${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+  const images = [post.cover_image_url || fallbackOg];
 
   const meta: Metadata = {
     title,
@@ -78,13 +88,13 @@ export async function generateMetadata(
       url: canonical,
       title,
       description: desc,
-      images: [{ url: ogImage, width: 1200, height: 630 }],
+      images: images.map((url) => ({ url, width: 1200, height: 630 })),
     },
     twitter: {
       card: "summary_large_image",
       title,
       description: desc,
-      images: [ogImage],
+      images,
     },
   };
 
