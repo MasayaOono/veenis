@@ -1,48 +1,35 @@
-// /app/posts/[slug]/page.tsx
 import type { Metadata, ResolvingMetadata } from "next";
 import ClientPostPage from "./ClientPostPage";
 import { createClient } from "@supabase/supabase-js";
 
-type Params = { slug: string };
-type Search = Record<string, string | string[] | undefined> | undefined;
-
-// server-side supabase（anonでRLS内アクセス）
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-const stripMd = (md: string) =>
-  (md || "")
-    .replace(/```[\s\S]*?```/g, "")
-    .replace(/`[^`]*`/g, "")
-    .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
-    .replace(/\[[^\]]*\]\([^)]+\)/g, "")
-    .replace(/[>#*_~]/g, "")
-    .replace(/\n+/g, " ")
-    .trim();
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-// ★ ここがポイント：params / searchParams は Promise を受け取り await する
 export async function generateMetadata(
-  {
-    params,
-    searchParams,
-  }: {
-    params: Promise<Params>;
-    searchParams: Promise<Search>;
+  props: {
+    params: Promise<{ slug: string }>;
+    searchParams?: Promise<Record<string, string | string[] | undefined>>;
   },
-  _parent: ResolvingMetadata
+  _res: ResolvingMetadata
 ): Promise<Metadata> {
-  const { slug } = await params;
-  const sp = await searchParams;
+  // ★ Promise を剥がす
+  const { slug } = await props.params;
+  const sp = (props.searchParams ? await props.searchParams : {}) || {};
+  const tokenRaw = sp["token"];
+  const token =
+    typeof tokenRaw === "string"
+      ? tokenRaw
+      : Array.isArray(tokenRaw)
+      ? tokenRaw[0]
+      : undefined;
 
-  const tokenMaybe = sp?.token;
-  const token = Array.isArray(tokenMaybe)
-    ? tokenMaybe[0]
-    : tokenMaybe ?? undefined;
-
+  // 記事取得
   let post: any = null;
-
   if (token) {
     const { data, error } = await supabase.rpc("get_post_by_token", {
       p_slug: slug,
@@ -58,25 +45,31 @@ export async function generateMetadata(
     if (!error) post = data;
   }
 
-  if (!post) {
-    return { title: "記事が見つかりませんでした" };
-  }
+  if (!post) return { title: "記事が見つかりませんでした" };
+
+  const site =
+    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
+    "https://veenis.vercel.app";
 
   const title = post.title ?? "記事";
   const desc =
-    stripMd(post.body_md ?? "").slice(0, 120) || "この記事のプレビューです。";
+    (post.body_md ?? "")
+      .replace(/```[\s\S]*?```/g, "")
+      .replace(/`[^`]*`/g, "")
+      .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
+      .replace(/\[[^\]]*\]\([^)]+\)/g, "")
+      .replace(/[#>*_~>-]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 120) || "記事のプレビュー";
 
-  const base =
-    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
-    "https://veenis.vercel.app";
-  const canonical = `${base}/posts/${encodeURIComponent(post.slug)}${
+  const canonical = `${site}/posts/${encodeURIComponent(post.slug)}${
     token ? `?token=${encodeURIComponent(token)}` : ""
   }`;
-
   const ogImage =
-    post.cover_image_url || `${base}/api/og?title=${encodeURIComponent(title)}`;
+    post.cover_image_url || `${site}/api/og?title=${encodeURIComponent(title)}`;
 
-  return {
+  const meta: Metadata = {
     title,
     description: desc,
     alternates: { canonical },
@@ -85,7 +78,7 @@ export async function generateMetadata(
       url: canonical,
       title,
       description: desc,
-      images: [{ url: ogImage }],
+      images: [{ url: ogImage, width: 1200, height: 630 }],
     },
     twitter: {
       card: "summary_large_image",
@@ -94,9 +87,14 @@ export async function generateMetadata(
       images: [ogImage],
     },
   };
+
+  if (post.visibility !== "public") {
+    meta.robots = { index: false, follow: false };
+  }
+
+  return meta;
 }
 
 export default function Page() {
-  // 表示はクライアントに委譲
   return <ClientPostPage />;
 }

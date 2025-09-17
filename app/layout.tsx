@@ -6,7 +6,11 @@ import { Container } from "@mui/material";
 import "./globals.css";
 import { Suspense } from "react";
 import Footer from "./_components/Footer";
-export const metadata: Metadata = { title: "Veenis" };
+
+const site =
+  process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || "https://veenis.vercel.app";
+
+export const metadata: Metadata = { title: "Veenis", metadataBase: new URL(site), };
 
 export default function RootLayout({
   children,
