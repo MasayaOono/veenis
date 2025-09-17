@@ -1,8 +1,7 @@
-// /app/api/og/route.tsx
+// app/api/og/route.tsx
 import { ImageResponse } from "next/og";
 
 export const runtime = "edge";
-export const contentType = "image/png";
 
 function truncate(str: string, n = 80) {
   return str.length > n ? str.slice(0, n) + "…" : str;
@@ -33,6 +32,6 @@ export async function GET(req: Request) {
         {title}
       </div>
     ),
-    { width: 1200, height: 630 } // ← ここでサイズ指定
+    { width: 1200, height: 630 }
   );
 }
