@@ -3,18 +3,23 @@ import type { Metadata, ResolvingMetadata } from "next";
 import ClientPostPage from "./ClientPostPage";
 import { createClient } from "@supabase/supabase-js";
 
-type Props = { params: { slug: string }; searchParams: { token?: string } };
+type Props = {
+  params: { slug: string };
+  searchParams?: Record<string, string | string[] | undefined>;
+};
 
 const stripMd = (md: string) =>
   (md || "")
-    .replace(/```[\s\S]*?```/g, "")
-    .replace(/`[^`]*`/g, "")
-    .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
-    .replace(/\[[^\]]*\]\([^)]+\)/g, "")
-    .replace(/[#>*_~>-]/g, "")
+    .replace(/```[\s\S]*?```/g, "") // fenced code block
+    .replace(/`[^`]*`/g, "") // inline code
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, "") // images
+    .replace(/\[[^\]]*\]\([^)]+\)/g, "") // links
+    .replace(/[>#*_~]/g, "") // md marks（※ハイフンは残す）
     .replace(/\n+/g, " ")
     .trim();
 
+// ※ サーバーで使うだけなら anon でもOK（RLSの範囲内）
+//   ただし ISR/SSG で安定させたいなら server client を使う設計も検討してね
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -22,10 +27,15 @@ const supabase = createClient(
 
 export async function generateMetadata(
   { params, searchParams }: Props,
-  _res: ResolvingMetadata
+  _parent: ResolvingMetadata
 ): Promise<Metadata> {
   const { slug } = params;
-  const token = searchParams.token;
+
+  // token を安全に取り出す（?token=... or ?token[]=... どちらでもOK）
+  const tokenMaybe = searchParams?.token;
+  const token = Array.isArray(tokenMaybe)
+    ? tokenMaybe[0]
+    : tokenMaybe ?? undefined;
 
   let post: any = null;
 
@@ -45,17 +55,17 @@ export async function generateMetadata(
   }
 
   if (!post) {
-    return {
-      title: "記事が見つかりませんでした",
-    };
+    return { title: "記事が見つかりませんでした" };
   }
 
   const title = post.title ?? "記事";
-  const desc = stripMd(post.body_md ?? "").slice(0, 120) || "記事のプレビュー";
+  const desc =
+    stripMd(post.body_md ?? "").slice(0, 120) || "この記事のプレビューです。";
+
   const base =
     process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
-    "https://example.com";
-  const url = `${base}/posts/${encodeURIComponent(post.slug)}${
+    "http://localhost:3000";
+  const canonical = `${base}/posts/${encodeURIComponent(post.slug)}${
     token ? `?token=${encodeURIComponent(token)}` : ""
   }`;
 
@@ -65,10 +75,10 @@ export async function generateMetadata(
   return {
     title,
     description: desc,
-    alternates: { canonical: url },
+    alternates: { canonical },
     openGraph: {
       type: "article",
-      url,
+      url: canonical,
       title,
       description: desc,
       images: [{ url: ogImage }],
