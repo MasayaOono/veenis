@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -14,8 +14,7 @@ import {
   Typography,
   Alert,
 } from "@mui/material";
-import { supabase } from "@/lib/supabaseClient";
-
+import { createClient } from "@/lib/supabase";
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -23,6 +22,7 @@ type Props = {
 };
 
 export default function AuthDialog({ open, onClose, onSignedIn }: Props) {
+  const supabase = useMemo(() => createClient(), []);
   const [tab, setTab] = useState<"magic" | "otp">("magic");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -45,12 +45,10 @@ export default function AuthDialog({ open, onClose, onSignedIn }: Props) {
     const uid = me.user?.id;
     if (!uid) return;
     // 最低限のレコードを作成（既存あれば無視）
-    await supabase
-      .from("profiles")
-      .upsert({ user_id: uid }, {
-        onConflict: "user_id",
-        ignoreDuplicates: true,
-      } as any);
+    await supabase.from("profiles").upsert({ user_id: uid }, {
+      onConflict: "user_id",
+      ignoreDuplicates: true,
+    } as any);
   };
 
   const sendMagicLink = async () => {

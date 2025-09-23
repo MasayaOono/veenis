@@ -1,6 +1,6 @@
 // app/groups/join/page.tsx
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Box,
@@ -14,9 +14,9 @@ import {
   Link,
 } from "@mui/material";
 import NextLink from "next/link";
-import { supabase } from "@/lib/supabaseClient";
-
+import { createClient } from "@/lib/supabase";
 export default function GroupJoinPage() {
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const params = useSearchParams();
   const tokenParam = params.get("token") ?? "";

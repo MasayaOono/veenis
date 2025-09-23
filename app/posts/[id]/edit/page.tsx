@@ -1,7 +1,8 @@
+// app/posts/[id]/edit/page.tsx
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import {
   Box,
@@ -14,7 +15,6 @@ import {
   InputLabel,
   FormControl,
   Chip,
-  Link,
   IconButton,
   Paper,
   Divider,
@@ -38,9 +38,11 @@ import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import MenuBookIcon from "@mui/icons-material/MenuBook";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import TocIcon from "@mui/icons-material/Toc";
-import { supabase } from "@/lib/supabaseClient";
+import { createClient } from "@/lib/supabase";
 import { slugify } from "@/utils/slugify";
 import type { RichEditorHandle } from "@/app/_components/RichEditor";
+import LeaveConfirmDialog from "@/app/_components/LeaveConfirmDialog";
+import { useLeaveConfirm } from "@/app/_hooks/useLeaveConfirm";
 
 const RichEditor = dynamic(() => import("@/app/_components/RichEditor"), {
   ssr: false,
@@ -62,7 +64,7 @@ function randomBase64Url(bytes = 20) {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-/* ===== テンプレ（最小構成） ===== */
+/* ===== テンプレ ===== */
 const SAMPLES: { label: string; md: string }[] = [
   {
     label: "共通：カウンセリング雛形",
@@ -109,9 +111,12 @@ const SAMPLES: { label: string; md: string }[] = [
 ];
 
 export default function EditPostPage() {
+  const supabase = useMemo(() => createClient(), []);
+
   const router = useRouter();
-  const params = useParams<{ slug: string }>();
-  const slugParam = decodeURIComponent(params.slug);
+  const params = useParams<{ id: string }>();
+  const idParam = decodeURIComponent(params.id);
+
   const editorRef = useRef<RichEditorHandle>(null);
   const coverInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -121,7 +126,10 @@ export default function EditPostPage() {
 
   // 既存投稿
   const [postId, setPostId] = useState<string | null>(null);
-  const [originalSlug, setOriginalSlug] = useState<string | null>(null);
+  const [originalSlug, setOriginalSlug] = useState<string | null>(null); // SEO用途に維持
+  const [existingLinkToken, setExistingLinkToken] = useState<string | null>(
+    null
+  ); // 既存token再利用
 
   // form
   const [title, setTitle] = useState("");
@@ -149,7 +157,7 @@ export default function EditPostPage() {
   const [err, setErr] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
-  // サイド：初期は開き（目次）
+  // サイドUI
   const [menuExpanded, setMenuExpanded] = useState(true);
   const [panelMode, setPanelMode] = useState<"toc" | "tpl">("toc");
 
@@ -157,14 +165,23 @@ export default function EditPostPage() {
   const [confirmOverwriteOpen, setConfirmOverwriteOpen] = useState(false);
   const pendingInsertMdRef = useRef<string | null>(null);
 
-  // 公開ダイアログ（編集でも同様に再公開操作できるように）
+  // 公開ダイアログ
   const [publishOpen, setPublishOpen] = useState(false);
   const [visDraft, setVisDraft] = useState<
     "draft" | "public" | "group" | "link"
   >("draft");
   const [groupId, setGroupId] = useState<string>("");
 
-  // 初期ロード：認証 → 投稿取得 → グループ取得
+  // ---- dirty 管理（初期値差分） ----
+  const initialRef = useRef<{
+    title: string;
+    body: string;
+    coverUrl: string | null;
+    tags: string;
+  } | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
+
+  // 初期ロード（idで取得）
   useEffect(() => {
     (async () => {
       try {
@@ -172,19 +189,19 @@ export default function EditPostPage() {
         const u = me.user;
         if (!u) {
           router.replace(
-            `/auth/login?next=/posts/${encodeURIComponent(slugParam)}/edit`
+            `/auth/login?next=/posts/${encodeURIComponent(idParam)}/edit`
           );
           return;
         }
         setUid(u.id);
 
-        // 投稿取得（slug）
+        // 投稿（id）で取得 ※ link_token を追加
         const { data: post, error: pErr } = await supabase
           .from("posts")
           .select(
-            "id, author_id, title, slug, body_md, cover_image_url, visibility, group_id"
+            "id, author_id, title, slug, body_md, cover_image_url, visibility, group_id, link_token"
           )
-          .eq("slug", slugParam)
+          .eq("id", idParam)
           .maybeSingle();
 
         if (pErr || !post) {
@@ -200,21 +217,23 @@ export default function EditPostPage() {
 
         setPostId(post.id);
         setOriginalSlug(post.slug);
+        setExistingLinkToken(post.link_token ?? null);
         setTitle(post.title ?? "");
         setBody(post.body_md ?? "");
         setCurrentCoverUrl(post.cover_image_url ?? null);
         setVisDraft((post.visibility as any) ?? "draft");
         setGroupId(post.group_id ?? "");
 
-        // 既存タグ取得（任意: posts_tags_view などがあれば）
+        // 既存タグ
         const { data: t } = await supabase
           .from("post_tags")
           .select("tag_name")
           .eq("post_id", post.id);
-        if (t && Array.isArray(t))
-          setTagsInput(t.map((x: any) => x.tag_name).join(" "));
+        const tagsInit =
+          t && Array.isArray(t) ? t.map((x: any) => x.tag_name).join(" ") : "";
+        setTagsInput(tagsInit);
 
-        // グループ
+        // groups
         const { data: gms } = await supabase
           .from("group_members")
           .select("group_id")
@@ -227,13 +246,43 @@ export default function EditPostPage() {
             .in("id", ids);
           setGroups((gs ?? []) as Group[]);
         }
+
+        // 初期スナップショット
+        initialRef.current = {
+          title: post.title ?? "",
+          body: post.body_md ?? "",
+          coverUrl: post.cover_image_url ?? null,
+          tags: tagsInit,
+        };
       } catch (e: any) {
         setErr(e?.message ?? "読み込みに失敗しました。");
       } finally {
         setLoading(false);
       }
     })();
-  }, [router, slugParam]);
+  }, [router, idParam]);
+
+  // dirty 判定（初期との差 + pendingUploads）
+  useEffect(() => {
+    if (!initialRef.current) return;
+    const base = initialRef.current;
+    const changedTitle = (title ?? "") !== (base.title ?? "");
+    const changedBody = (body ?? "") !== (base.body ?? "");
+    const tagsNow = tagsInput.trim();
+    const changedTags = tagsNow !== (base.tags ?? "");
+    const addedCover = !!coverFile;
+    const removedCover = base.coverUrl && !coverFile && !currentCoverUrl;
+    const pendingUploads = editorRef.current?.hasPendingUploads?.() === true;
+
+    setIsDirty(
+      changedTitle ||
+        changedBody ||
+        changedTags ||
+        addedCover ||
+        removedCover ||
+        pendingUploads
+    );
+  }, [title, body, tagsInput, coverFile, currentCoverUrl]);
 
   // ストレージ共通
   const uploadToSupabase = async (file: File) => {
@@ -257,7 +306,7 @@ export default function EditPostPage() {
     return pub.publicUrl;
   };
 
-  // カバー画像選択
+  // カバー画像
   const handlePickCover = () => coverInputRef.current?.click();
   const handleCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -274,7 +323,7 @@ export default function EditPostPage() {
     if (coverInputRef.current) coverInputRef.current.value = "";
   };
 
-  // ===== 保存（更新） =====
+  // ===== 更新 / 公開（slug衝突リトライ + link_token再利用） =====
   const doSubmit = async () => {
     if (!uid || !postId) return;
     setErr(null);
@@ -282,7 +331,6 @@ export default function EditPostPage() {
     setSaving(true);
 
     try {
-      // 本文内の一時画像アップロード & 置換
       const finalMd =
         (await editorRef.current?.exportMarkdownWithUploads(
           uploadToSupabase
@@ -291,62 +339,82 @@ export default function EditPostPage() {
 
       // カバー画像アップロード
       let coverUrl: string | null = currentCoverUrl;
-      if (coverFile) {
-        coverUrl = await uploadToSupabase(coverFile);
-      }
+      if (coverFile) coverUrl = await uploadToSupabase(coverFile);
 
-      // slug はタイトルからリネームするか現状維持か
-      let newSlug = originalSlug || "";
-      if (title && originalSlug) {
-        const next = slugify(title);
-        if (next && next !== originalSlug) newSlug = next;
-      }
-
-      // 更新
+      // 希望 slug 候補（SEO用途）。originalSlug 未定義でも安全に。
+      const desired = originalSlug
+        ? title
+          ? slugify(title)
+          : originalSlug
+        : slugify(title || "untitled");
       const isPublished = visDraft !== "draft";
-      const linkToken = visDraft === "link" ? randomBase64Url(20) : null;
 
-      const { data, error } = await supabase
-        .from("posts")
-        .update({
-          title,
-          slug: newSlug,
-          body_md: finalMd,
-          cover_image_url: coverUrl,
-          visibility: visDraft,
-          link_token: linkToken,
-          group_id: visDraft === "group" ? groupId : null,
-          is_published: isPublished,
-          read_minutes: readMinutes,
-          published_at: isPublished ? new Date().toISOString() : null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", postId)
-        .select("id, slug, link_token")
-        .single();
-      if (error) throw error;
+      // link_token 方針：link以外→null / link→既存 or 新規
+      const nextLinkToken =
+        visDraft === "link" ? existingLinkToken || randomBase64Url(20) : null;
 
-      // タグ upsert（任意: rpc がある前提）
+      const tryUpdate = async (slugCandidate: string) => {
+        const { data, error } = await supabase
+          .from("posts")
+          .update({
+            title,
+            slug: slugCandidate,
+            body_md: finalMd,
+            cover_image_url: coverUrl,
+            visibility: visDraft,
+            link_token: nextLinkToken,
+            group_id: visDraft === "group" ? groupId : null,
+            is_published: isPublished,
+            read_minutes: readMinutes,
+            published_at: isPublished ? new Date().toISOString() : null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", postId)
+          .select("id, slug, link_token")
+          .single();
+        return { data, error };
+      };
+
+      // まず希望slugで更新
+      let res = await tryUpdate(desired);
+
+      // 一意制約衝突(23505) → サフィックスで最大2回リトライ
+      const isUniqueErr = (e: any) =>
+        e &&
+        (e.code === "23505" ||
+          String(e.message || "").includes("duplicate key"));
+      if (res.error && isUniqueErr(res.error)) {
+        const s1 = `${desired}-${Date.now().toString(36).slice(-4)}`;
+        res = await tryUpdate(s1);
+        if (res.error && isUniqueErr(res.error)) {
+          const s2 = `${desired}-${Math.random().toString(36).slice(2, 6)}`;
+          res = await tryUpdate(s2);
+        }
+      }
+      if (res.error) throw res.error;
+
+      const saved = res.data!;
+      setPublishOpen(false);
+      setIsDirty(false);
+      setExistingLinkToken(saved.link_token ?? null);
+
+      // タグ反映（任意）
       if (tags.length) {
         const { error: tagErr } = await supabase.rpc("upsert_post_tags", {
-          p_post_id: data!.id,
+          p_post_id: saved.id,
           p_tag_names: tags,
         });
         if (tagErr)
           setInfo(`更新は成功しましたが、タグの反映に失敗: ${tagErr.message}`);
       }
 
-      setPublishOpen(false);
-
-      // リダイレクト
+      // 遷移は id ベース
       if (visDraft === "link") {
-        const share = `${window.location.origin}/posts/${data!.slug}?token=${
-          data!.link_token
-        }`;
+        const share = `${window.location.origin}/posts/${saved.id}?token=${saved.link_token}`;
         await navigator.clipboard.writeText(share).catch(() => {});
-        router.replace(`/posts/${data!.slug}?token=${data!.link_token}`);
+        router.replace(`/posts/${saved.id}?token=${saved.link_token}`);
       } else {
-        router.replace(`/posts/${data!.slug}`);
+        router.replace(`/posts/${saved.id}`);
       }
     } catch (e: any) {
       setErr(e?.message ?? "保存に失敗しました。");
@@ -355,7 +423,74 @@ export default function EditPostPage() {
     }
   };
 
-  // ===== 目次（Markdown → H1〜H3 抽出） =====
+  // ===== テンプレ挿入 =====
+  const tryInsertTemplate = (md: string) => {
+    if (body.trim().length === 0) {
+      setBody(md);
+      return;
+    }
+    pendingInsertMdRef.current = md;
+    setConfirmOverwriteOpen(true);
+  };
+  const confirmOverwrite = () => {
+    if (pendingInsertMdRef.current) {
+      setBody(pendingInsertMdRef.current);
+      pendingInsertMdRef.current = null;
+    }
+    setConfirmOverwriteOpen(false);
+  };
+
+  // ===== 下書き保存（離脱ガード用） =====
+  const saveDraftOnly = useCallback(async () => {
+    if (!uid || !postId) throw new Error("auth required");
+
+    setErr(null);
+    setSaving(true);
+    try {
+      const finalMd =
+        (await editorRef.current?.exportMarkdownWithUploads(
+          uploadToSupabase
+        )) ?? body;
+      const readMinutes = estimateReadMinutes(finalMd);
+
+      let coverUrl: string | null = currentCoverUrl;
+      if (coverFile) coverUrl = await uploadToSupabase(coverFile);
+
+      const { error } = await supabase
+        .from("posts")
+        .update({
+          title,
+          body_md: finalMd,
+          cover_image_url: coverUrl,
+          visibility: "draft",
+          group_id: null,
+          is_published: false,
+          read_minutes: readMinutes,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", postId);
+      if (error) throw error;
+
+      setInfo("下書きとして保存しました。");
+    } finally {
+      setSaving(false);
+    }
+  }, [uid, postId, title, body, coverFile, currentCoverUrl]);
+
+  // ===== 離脱ガード =====
+  const leave = useLeaveConfirm({
+    isDirty,
+    onSaveDraft: saveDraftOnly,
+    canSave: !!uid,
+  });
+
+  // ===== レイアウト寸法 =====
+  const railW = 72;
+  const paneW = 300;
+  const editorMax = 780;
+  const sideW = menuExpanded ? railW + paneW : railW;
+
+  // ===== TOC =====
   const toc: TocItem[] = useMemo(() => {
     const out: TocItem[] = [];
     const re = /^(#{1,3})\s+(.+?)\s*$/gm;
@@ -380,29 +515,6 @@ export default function EditPostPage() {
     if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
   };
 
-  // ===== テンプレ挿入 =====
-  const tryInsertTemplate = (md: string) => {
-    if (body.trim().length === 0) {
-      setBody(md);
-      return;
-    }
-    pendingInsertMdRef.current = md;
-    setConfirmOverwriteOpen(true);
-  };
-  const confirmOverwrite = () => {
-    if (pendingInsertMdRef.current) {
-      setBody(pendingInsertMdRef.current);
-      pendingInsertMdRef.current = null;
-    }
-    setConfirmOverwriteOpen(false);
-  };
-
-  // ===== レイアウト寸法 =====
-  const railW = 72;
-  const paneW = 300;
-  const editorMax = 780;
-  const sideW = menuExpanded ? railW + paneW : railW;
-
   if (loading) {
     return (
       <Box sx={{ p: 3, display: "flex", alignItems: "center", gap: 1 }}>
@@ -418,13 +530,19 @@ export default function EditPostPage() {
     <Box sx={{ position: "relative" }}>
       {/* 操作バー（上） */}
       <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 1 }}>
-        <Link component={NextLink} href="/posts" underline="hover">
-          ← 一覧へ戻る
-        </Link>
         <Box sx={{ flex: 1 }} />
         <Typography variant="body2" color="text.secondary">
           読了目安: {estimateReadMinutes(body)} 分
         </Typography>
+        <Button
+          component={NextLink}
+          href="/me"
+          variant="outlined"
+          color="inherit"
+          sx={{ mr: 1 }}
+        >
+          閉じる
+        </Button>
         <Button
           variant="contained"
           onClick={() => setPublishOpen(true)}
@@ -434,7 +552,7 @@ export default function EditPostPage() {
         </Button>
       </Stack>
 
-      {/* グリッド：左サイド（ハンバーガー風） + 右メイン */}
+      {/* グリッド：左サイド + 右メイン */}
       <Box
         sx={{
           display: "grid",
@@ -444,7 +562,7 @@ export default function EditPostPage() {
           alignItems: "start",
         }}
       >
-        {/* === 左サイド：縦アイコン + 右にカード === */}
+        {/* 左：縦レール + パネル */}
         <Box
           sx={{
             position: "sticky",
@@ -456,7 +574,6 @@ export default function EditPostPage() {
             transition: "grid-template-columns .2s ease",
           }}
         >
-          {/* 縦アイコン（常時表示 / クリックで開く） */}
           <Paper
             variant="outlined"
             sx={{
@@ -501,7 +618,6 @@ export default function EditPostPage() {
             </Tooltip>
           </Paper>
 
-          {/* 右カード（開いた時のみ） */}
           {menuExpanded && (
             <Paper
               variant="outlined"
@@ -514,7 +630,7 @@ export default function EditPostPage() {
                 backdropFilter: "saturate(180%) blur(12px)",
               }}
             >
-              {/* ヘッダー：タイトル + 右上「閉じる」 */}
+              {/* ヘッダー */}
               <Stack
                 direction="row"
                 alignItems="center"
@@ -536,7 +652,7 @@ export default function EditPostPage() {
 
               <Divider />
 
-              {/* コンテンツ */}
+              {/* 中身 */}
               <Box sx={{ flex: 1, overflow: "auto" }}>
                 {panelMode === "toc" ? (
                   <List dense sx={{ py: 0.5 }}>
@@ -613,9 +729,9 @@ export default function EditPostPage() {
           )}
         </Box>
 
-        {/* === 右メイン === */}
+        {/* 右：本文 */}
         <Box>
-          {/* タイトル（枠線なし） */}
+          {/* タイトル */}
           <Box sx={{ mb: 1.5, display: "flex", justifyContent: "center" }}>
             <InputBase
               value={title}
@@ -650,7 +766,6 @@ export default function EditPostPage() {
             </Box>
           </Box>
 
-          {/* ちょい下：カバー画像＆タグ＆公開設定（ダイアログ） */}
           {err && (
             <Alert severity="error" sx={{ mt: 2 }}>
               {err}
@@ -664,7 +779,7 @@ export default function EditPostPage() {
         </Box>
       </Box>
 
-      {/* 公開方法 + タグ + カバー画像（ダイアログ） */}
+      {/* 公開設定ダイアログ */}
       <Dialog
         open={publishOpen}
         onClose={() => setPublishOpen(false)}
@@ -778,7 +893,7 @@ export default function EditPostPage() {
                 </IconButton>
               </Paper>
             ) : (
-              <Button variant="outlined" onClick={() => handlePickCover()}>
+              <Button variant="outlined" onClick={handlePickCover}>
                 カバー画像を選択
               </Button>
             )}
@@ -803,7 +918,7 @@ export default function EditPostPage() {
         </DialogActions>
       </Dialog>
 
-      {/* 上書き警告（テンプレ挿入時） */}
+      {/* テンプレ上書き警告 */}
       <Dialog
         open={confirmOverwriteOpen}
         onClose={() => setConfirmOverwriteOpen(false)}
@@ -823,6 +938,16 @@ export default function EditPostPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* 離脱ガード */}
+      <LeaveConfirmDialog
+        open={leave.dialogOpen}
+        canSave={leave.canSave}
+        isSaving={leave.isSaving}
+        onCancel={leave.cancelLeave}
+        onDiscard={leave.confirmDiscardAndLeave}
+        onSaveAndLeave={leave.confirmSaveAndLeave}
+      />
     </Box>
   );
 }

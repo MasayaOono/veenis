@@ -1,4 +1,3 @@
-// app/groups/[id]/page.tsx
 "use client";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -18,9 +17,19 @@ import {
   CircularProgress,
   Pagination,
   CardActionArea,
+  Tooltip,
+  alpha,
 } from "@mui/material";
+import Link from "next/link";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
-import { supabase } from "@/lib/supabaseClient";
+import VerifiedUserIcon from "@mui/icons-material/VerifiedUser";
+import ShieldIcon from "@mui/icons-material/Shield";
+import GroupIcon from "@mui/icons-material/Group";
+import ArticleIcon from "@mui/icons-material/Article";
+import LogoutIcon from "@mui/icons-material/Logout";
+import DeleteForeverIcon from "@mui/icons-material/DeleteForever";
+import LinkIcon from "@mui/icons-material/Link";
+import { createClient } from "@/lib/supabase";
 
 type MemberRow = {
   user_id: string;
@@ -46,6 +55,7 @@ type GroupPost = {
 const POSTS_PER_PAGE = 10;
 
 export default function GroupDetailPage() {
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
   const gid = id as string;
@@ -56,6 +66,9 @@ export default function GroupDetailPage() {
   const [name, setName] = useState<string>("");
   const [inviteToken, setInviteToken] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [myRole, setMyRole] = useState<"owner" | "admin" | "member" | null>(
+    null
+  );
   const [members, setMembers] = useState<MemberRow[]>([]);
 
   // グループ限定記事
@@ -78,11 +91,12 @@ export default function GroupDetailPage() {
       try {
         const { data: g, error: gerr } = await supabase
           .from("groups")
-          .select("id, name, invite_token")
+          .select("id, name, invite_token, owner_id")
           .eq("id", gid)
           .maybeSingle();
         if (gerr) throw gerr;
         if (!g) throw new Error("グループが見つかりません");
+
         if (!cancelled) {
           setName(g.name);
           setInviteToken(g.invite_token ?? null);
@@ -102,6 +116,15 @@ export default function GroupDetailPage() {
         if (merr) throw merr;
 
         const uids = (gm ?? []).map((m: any) => m.user_id);
+
+        // 自分のロール
+        const { data: me } = await supabase.auth.getUser();
+        const uid = me.user?.id || null;
+        const mine =
+          (gm ?? []).find((m: any) => m.user_id === uid)?.role ?? null;
+        if (!cancelled) setMyRole(mine ?? null);
+
+        // プロフィールまとめ取得
         let profMap = new Map<
           string,
           {
@@ -152,7 +175,6 @@ export default function GroupDetailPage() {
         const from = (page - 1) * POSTS_PER_PAGE;
         const to = from + POSTS_PER_PAGE - 1;
 
-        // まず記事本体（RLSでメンバー以外は空になる）
         const { data, count, error } = await supabase
           .from("posts")
           .select(
@@ -177,7 +199,6 @@ export default function GroupDetailPage() {
           author_id: string;
         }[];
 
-        // 著者情報をまとめて取得して合成
         const authorIds = Array.from(new Set(rows.map((r) => r.author_id)));
         let authorMap = new Map<
           string,
@@ -214,7 +235,7 @@ export default function GroupDetailPage() {
             slug: r.slug,
             cover_image_url: r.cover_image_url ?? null,
             published_at: r.published_at,
-            read_minutes: r.read_minutes,
+            read_minutes: r.read_minutes ?? null,
             author_id: r.author_id,
             author_display_name: a.display_name,
             author_username: a.username,
@@ -235,7 +256,6 @@ export default function GroupDetailPage() {
     [gid]
   );
 
-  // 初回 & ページ変更で読込
   useEffect(() => {
     loadGroupPosts(postPage);
   }, [postPage, loadGroupPosts]);
@@ -256,6 +276,10 @@ export default function GroupDetailPage() {
   };
 
   const leaveGroup = async () => {
+    if (myRole === "owner") {
+      setMsg("オーナーは脱退できません。先にグループを削除してください。");
+      return;
+    }
     try {
       const { data: me } = await supabase.auth.getUser();
       const uid = me.user?.id;
@@ -269,39 +293,96 @@ export default function GroupDetailPage() {
       setMsg("グループを脱退しました");
       router.push("/groups");
     } catch (e: any) {
-      setMsg(e.message ?? "脱退に失敗しました（オーナーは脱退できません）");
+      setMsg(e.message ?? "脱退に失敗しました");
     }
   };
 
+  // ← 重要：直接DELETEせず RPC で削除（RLS/トリガを安全に通過）
   const deleteGroup = async () => {
     if (!confirm("本当に削除しますか？この操作は取り消せません。")) return;
-    const { error } = await supabase.from("groups").delete().eq("id", gid);
-    if (error) return setMsg(error.message);
-    setMsg("グループを削除しました");
-    router.push("/groups");
+    try {
+      const { data, error } = await supabase.rpc("admin_delete_group", {
+        p_group_id: gid,
+      });
+      if (error) throw error;
+      setMsg("グループを削除しました");
+      router.push("/groups");
+    } catch (e: any) {
+      setMsg(e.message ?? "削除に失敗しました");
+    }
   };
 
+  const section = (title: string, icon: React.ReactNode) => (
+    <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+      <Box
+        sx={{
+          width: 28,
+          height: 28,
+          borderRadius: 1,
+          display: "grid",
+          placeItems: "center",
+          bgcolor: (t) => alpha(t.palette.primary.main, 0.1),
+          color: "primary.main",
+        }}
+      >
+        {icon}
+      </Box>
+      <Typography variant="subtitle2" color="text.secondary">
+        {title}
+      </Typography>
+    </Stack>
+  );
+
   return (
-    <Box sx={{ maxWidth: 960, mx: "auto", px: 2, py: 3 }}>
+    <Box sx={{ maxWidth: 980, mx: "auto", px: 2, py: 3 }}>
       {loading ? (
         <Box sx={{ display: "grid", placeItems: "center", py: 6 }}>
           <CircularProgress />
         </Box>
       ) : (
         <>
+          {/* ヘッダー */}
           <Stack
-            direction="row"
+            direction={{ xs: "column", sm: "row" }}
             justifyContent="space-between"
-            alignItems="center"
+            alignItems={{ xs: "flex-start", sm: "center" }}
+            spacing={1.5}
             sx={{ mb: 2 }}
           >
-            <Typography variant="h5">{name}</Typography>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <GroupIcon color="primary" />
+              <Typography variant="h5" sx={{ fontWeight: 800 }}>
+                {name}
+              </Typography>
+              {myRole && (
+                <Chip
+                  size="small"
+                  label={myRole}
+                  color={
+                    myRole === "owner"
+                      ? "primary"
+                      : myRole === "admin"
+                      ? "secondary"
+                      : "default"
+                  }
+                  sx={{ textTransform: "capitalize" }}
+                />
+              )}
+            </Stack>
+
             <Stack direction="row" spacing={1}>
               <Button onClick={() => history.back()}>戻る</Button>
               {isAdmin && (
-                <Button variant="outlined" color="error" onClick={deleteGroup}>
-                  グループを削除
-                </Button>
+                <Tooltip title="グループを完全削除（記事やメンバーは影響しませんが、参加関係は解除されます）">
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    onClick={deleteGroup}
+                    startIcon={<DeleteForeverIcon />}
+                  >
+                    グループを削除
+                  </Button>
+                </Tooltip>
               )}
             </Stack>
           </Stack>
@@ -309,60 +390,51 @@ export default function GroupDetailPage() {
           {/* 招待リンク */}
           <Card variant="outlined" sx={{ mb: 3 }}>
             <CardContent>
-              <Stack spacing={1}>
-                <Typography variant="subtitle2" color="text.secondary">
-                  招待
-                </Typography>
-                {inviteToken ? (
-                  <Stack
-                    direction={{ xs: "column", sm: "row" }}
-                    spacing={1}
-                    alignItems={{ sm: "center" }}
-                  >
-                    <TextField
-                      value={inviteLink ?? ""}
-                      fullWidth
-                      InputProps={{ readOnly: true }}
-                    />
-                    <Button
-                      onClick={copyInvite}
-                      startIcon={<ContentCopyIcon />}
-                    >
-                      コピー
-                    </Button>
-                    {isAdmin && (
-                      <Button variant="outlined" onClick={regenerateInvite}>
-                        再発行
-                      </Button>
-                    )}
-                  </Stack>
-                ) : isAdmin ? (
-                  <Button variant="outlined" onClick={regenerateInvite}>
-                    招待リンクを発行
+              {section("招待", <LinkIcon fontSize="small" />)}
+              {inviteToken ? (
+                <Stack
+                  direction={{ xs: "column", sm: "row" }}
+                  spacing={1}
+                  alignItems={{ sm: "center" }}
+                >
+                  <TextField
+                    value={inviteLink ?? ""}
+                    fullWidth
+                    InputProps={{ readOnly: true }}
+                  />
+                  <Button onClick={copyInvite} startIcon={<ContentCopyIcon />}>
+                    コピー
                   </Button>
-                ) : (
-                  <Typography variant="body2" color="text.secondary">
-                    招待リンクは管理者のみ表示できます
-                  </Typography>
-                )}
-                <Typography variant="caption" color="text.secondary">
-                  共有URLは <code>/g/&lt;token&gt;</code>{" "}
-                  です。踏むだけで参加できます（要ログイン）。
+                  {isAdmin && (
+                    <Button variant="outlined" onClick={regenerateInvite}>
+                      再発行
+                    </Button>
+                  )}
+                </Stack>
+              ) : isAdmin ? (
+                <Button variant="outlined" onClick={regenerateInvite}>
+                  招待リンクを発行
+                </Button>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  招待リンクは管理者のみ表示できます
                 </Typography>
-              </Stack>
+              )}
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ mt: 0.5, display: "block" }}
+              >
+                共有URLは <code>/g/&lt;token&gt;</code>{" "}
+                です。踏むだけで参加できます（要ログイン）。
+              </Typography>
             </CardContent>
           </Card>
 
           {/* メンバー一覧 */}
           <Card variant="outlined" sx={{ mb: 3 }}>
             <CardContent>
-              <Typography
-                variant="subtitle2"
-                color="text.secondary"
-                gutterBottom
-              >
-                メンバー
-              </Typography>
+              {section("メンバー", <VerifiedUserIcon fontSize="small" />)}
               <Divider sx={{ mb: 1 }} />
               <Stack spacing={1}>
                 {members.map((m) => (
@@ -373,20 +445,41 @@ export default function GroupDetailPage() {
                     alignItems="center"
                     justifyContent="space-between"
                   >
-                    <Stack direction="row" spacing={1} alignItems="center">
+                    <Stack
+                      direction="row"
+                      spacing={1}
+                      alignItems="center"
+                      sx={{ minWidth: 0 }}
+                    >
                       <Avatar src={m.avatar_url ?? undefined} />
-                      <Stack>
-                        <Typography variant="body2">
+                      <Stack sx={{ minWidth: 0 }}>
+                        <Typography variant="body2" noWrap>
                           {m.display_name ?? m.username ?? "ユーザー"}
                         </Typography>
                         {m.username && (
-                          <Typography variant="caption" color="text.secondary">
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            noWrap
+                          >
                             @{m.username}
                           </Typography>
                         )}
                       </Stack>
                     </Stack>
-                    <Chip size="small" label={m.role} />
+                    <Chip
+                      size="small"
+                      icon={m.role === "owner" ? <ShieldIcon /> : undefined}
+                      label={m.role}
+                      sx={{ textTransform: "capitalize" }}
+                      color={
+                        m.role === "owner"
+                          ? "primary"
+                          : m.role === "admin"
+                          ? "secondary"
+                          : "default"
+                      }
+                    />
                   </Stack>
                 ))}
                 {members.length === 0 && (
@@ -398,24 +491,22 @@ export default function GroupDetailPage() {
             </CardContent>
           </Card>
 
-          {/* ===== グループ限定記事 一覧 ===== */}
+          {/* グループ限定記事 */}
           <Card variant="outlined" sx={{ mb: 3 }}>
             <CardContent>
-              <Stack
-                direction="row"
-                justifyContent="space-between"
-                alignItems="baseline"
-                sx={{ mb: 1 }}
-              >
-                <Typography variant="subtitle2" color="text.secondary">
-                  このグループの投稿（グループ限定）
+              {section(
+                "このグループの投稿（グループ限定）",
+                <ArticleIcon fontSize="small" />
+              )}
+              {postsTotal > 0 && (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ mb: 1, display: "block" }}
+                >
+                  全{postsTotal}件
                 </Typography>
-                {postsTotal > 0 && (
-                  <Typography variant="caption" color="text.secondary">
-                    全{postsTotal}件
-                  </Typography>
-                )}
-              </Stack>
+              )}
 
               {postsLoading ? (
                 <Box sx={{ display: "grid", placeItems: "center", py: 4 }}>
@@ -428,15 +519,24 @@ export default function GroupDetailPage() {
               ) : (
                 <Stack spacing={1}>
                   {posts.map((p) => (
-                    <Card key={p.id} variant="outlined">
-                      <CardActionArea href={`/posts/${p.slug}`}>
+                    <Card
+                      key={p.id}
+                      variant="outlined"
+                      sx={{ overflow: "hidden" }}
+                    >
+                      <CardActionArea component={Link} href={`/posts/${p.id}`}>
                         <CardContent>
-                          <Typography variant="subtitle1">{p.title}</Typography>
+                          <Typography
+                            variant="subtitle1"
+                            sx={{ fontWeight: 700 }}
+                          >
+                            {p.title}
+                          </Typography>
                           <Stack
                             direction="row"
                             spacing={1}
                             alignItems="center"
-                            sx={{ mt: 0.5 }}
+                            sx={{ mt: 0.75, flexWrap: "wrap" }}
                           >
                             <Avatar
                               src={p.author_avatar_url ?? undefined}
@@ -494,9 +594,25 @@ export default function GroupDetailPage() {
             <Button onClick={() => router.push("/groups")}>
               グループ一覧へ
             </Button>
-            <Button color="warning" variant="outlined" onClick={leaveGroup}>
-              このグループを脱退
-            </Button>
+            <Tooltip
+              title={
+                myRole === "owner"
+                  ? "オーナーは脱退できません（削除してください）"
+                  : ""
+              }
+            >
+              <span>
+                <Button
+                  color="warning"
+                  variant="outlined"
+                  onClick={leaveGroup}
+                  startIcon={<LogoutIcon />}
+                  disabled={myRole === "owner"}
+                >
+                  このグループを脱退
+                </Button>
+              </span>
+            </Tooltip>
           </Stack>
         </>
       )}

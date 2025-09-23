@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { createClient } from "@/lib/supabase";
 import {
   Box,
   Button,
@@ -15,6 +15,7 @@ import {
 import NextLink from "next/link";
 
 async function ensureProfile() {
+  const supabase = createClient();
   const { data: me } = await supabase.auth.getUser();
   const uid = me.user?.id;
   if (!uid) return;
@@ -24,6 +25,7 @@ async function ensureProfile() {
 }
 
 export default function SignupPage() {
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

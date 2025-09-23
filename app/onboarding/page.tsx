@@ -14,7 +14,7 @@ import {
   CircularProgress,
   MenuItem,
 } from "@mui/material";
-import { supabase } from "@/lib/supabaseClient";
+import { createClient } from "@/lib/supabase";
 
 function validateUsername(raw: string) {
   const v = raw.normalize("NFKC").toLowerCase().trim();
@@ -23,6 +23,7 @@ function validateUsername(raw: string) {
 }
 
 async function uploadAvatar(file: File) {
+  const supabase = createClient();
   const { data: me } = await supabase.auth.getUser();
   const uid = me?.user?.id;
   if (!uid) throw new Error("auth required");
@@ -50,6 +51,7 @@ const JOB_OPTIONS = [
 ];
 
 export default function OnboardingPage() {
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const params = useSearchParams();
   const next = params.get("next") || "/posts";

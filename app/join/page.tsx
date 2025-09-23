@@ -1,10 +1,11 @@
 "use client";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { createClient } from "@/lib/supabase";
 import { Box, CircularProgress } from "@mui/material";
 
 export default function JoinGroupPage() {
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const token = useSearchParams().get("token");
 

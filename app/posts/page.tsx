@@ -21,12 +21,12 @@ import {
 import SearchIcon from "@mui/icons-material/Search";
 import ClearIcon from "@mui/icons-material/Clear";
 import PostCard from "@/app/_components/PostCard";
-import { supabase } from "@/lib/supabaseClient";
+import { createClient } from "@/lib/supabase";
 
 type FeedPost = {
   id: string;
   title: string;
-  slug: string;
+  slug?: string;
   cover_image_url: string | null;
   like_count: number;
   author_username: string | null;
@@ -69,6 +69,7 @@ function arraysEqual(a: string[], b: string[]) {
 }
 
 export default function PostsIndexPage() {
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -384,7 +385,7 @@ export default function PostsIndexPage() {
             <PostCard
               key={p.id}
               title={p.title}
-              slug={p.slug}
+              id={p.id}
               cover_image_url={p.cover_image_url}
               likeCount={p.like_count ?? 0}
               author={{

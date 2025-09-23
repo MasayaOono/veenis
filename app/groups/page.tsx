@@ -1,6 +1,6 @@
 // app/groups/page.tsx
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Box,
@@ -19,9 +19,10 @@ import {
   Snackbar,
   CircularProgress,
   Link,
+  Tooltip,
 } from "@mui/material";
 import NextLink from "next/link";
-import { supabase } from "@/lib/supabaseClient";
+import { createClient } from "@/lib/supabase";
 
 type GroupRow = {
   id: string;
@@ -29,7 +30,10 @@ type GroupRow = {
   role: "owner" | "admin" | "member";
 };
 
+const MAX_FREE_GROUPS = 3; // 自分が owner のグループ最大数（無料）
+
 export default function GroupsIndexPage() {
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const params = useSearchParams();
   const tokenFromQuery = params.get("token"); // /groups?token=... にも対応
@@ -42,7 +46,36 @@ export default function GroupsIndexPage() {
   const [newName, setNewName] = useState("");
   const [joinToken, setJoinToken] = useState("");
 
-  // 所属一覧＋クエリtokenがあれば参加（クライアント側フォールバック）
+  // 上限判定用：自分が owner のグループ数
+  const [ownedCount, setOwnedCount] = useState<number>(0);
+  const [limitsLoading, setLimitsLoading] = useState<boolean>(true);
+
+  // 将来の課金対応フラグ（今は常に false）
+  const canExceedLimit = false;
+
+  // 自分が owner のグループ数を取得
+  const refreshOwnedCount = async () => {
+    setLimitsLoading(true);
+    try {
+      const { data: me } = await supabase.auth.getUser();
+      const uid = me.user?.id;
+      if (!uid) throw new Error("未ログインです");
+
+      const { count, error } = await supabase
+        .from("groups")
+        .select("id", { count: "exact", head: true })
+        .eq("owner_id", uid);
+
+      if (error) throw error;
+      setOwnedCount(count ?? 0);
+    } catch (e: any) {
+      setMsg(e?.message ?? "上限情報の取得に失敗しました");
+    } finally {
+      setLimitsLoading(false);
+    }
+  };
+
+  // 所属一覧＋クエリtokenがあれば参加（クライアント側フォールバック）＋上限取得
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -52,6 +85,7 @@ export default function GroupsIndexPage() {
         const uid = me.user?.id;
         if (!uid) throw new Error("未ログインです");
 
+        // 所属グループ一覧
         const { data: gm, error: e1 } = await supabase
           .from("group_members")
           .select("group_id, role")
@@ -74,9 +108,12 @@ export default function GroupsIndexPage() {
         }
         if (!cancelled) setGroups(list);
 
+        // 自分が owner の数も更新
+        await refreshOwnedCount();
+
         // クエリtokenがあれば参加→URL正規化
         if (tokenFromQuery) {
-          const { data, error } = await supabase.rpc("join_group_by_token", {
+          const { error } = await supabase.rpc("join_group_by_token", {
             p_token: tokenFromQuery,
           });
           if (error) throw error;
@@ -119,6 +156,7 @@ export default function GroupsIndexPage() {
         }));
       }
       setGroups(list);
+      await refreshOwnedCount();
     } finally {
       setLoading(false);
     }
@@ -126,26 +164,51 @@ export default function GroupsIndexPage() {
 
   const createGroup = async () => {
     if (!newName.trim()) return;
-    const { data: me } = await supabase.auth.getUser();
-    const uid = me.user?.id;
-    if (!uid) return setMsg("未ログインです");
 
-    const { data, error } = await supabase
-      .from("groups")
-      .insert([{ name: newName.trim(), owner_id: uid }])
-      .select("id")
-      .single();
-    if (error) return setMsg(error.message);
+    try {
+      const { data: me } = await supabase.auth.getUser();
+      const uid = me.user?.id;
+      if (!uid) {
+        setMsg("未ログインです");
+        return;
+      }
 
-    setOpenCreate(false);
-    setNewName("");
-    setMsg("グループを作成しました");
-    router.push(`/groups/${data!.id}`); // 詳細へ
+      // 作成直前にも最新カウント確認（同時実行対策）
+      const { count, error: cntErr } = await supabase
+        .from("groups")
+        .select("id", { count: "exact", head: true })
+        .eq("owner_id", uid);
+      if (cntErr) throw cntErr;
+
+      const currentCount = count ?? 0;
+      if (!canExceedLimit && currentCount >= MAX_FREE_GROUPS) {
+        setMsg(
+          `無料プランではグループ作成は最大 ${MAX_FREE_GROUPS} 件までです。`
+        );
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("groups")
+        .insert([{ name: newName.trim(), owner_id: uid }])
+        .select("id")
+        .single();
+      if (error) throw error;
+
+      setOpenCreate(false);
+      setNewName("");
+      setMsg("グループを作成しました");
+      // 成功後に自前カウント更新
+      await refreshOwnedCount();
+      router.push(`/groups/${data!.id}`); // 詳細へ
+    } catch (e: any) {
+      setMsg(e?.message ?? "グループ作成に失敗しました");
+    }
   };
 
   const joinByToken = async () => {
     if (!joinToken.trim()) return;
-    const { data, error } = await supabase.rpc("join_group_by_token", {
+    const { error } = await supabase.rpc("join_group_by_token", {
       p_token: joinToken.trim(),
     });
     if (error) {
@@ -157,19 +220,49 @@ export default function GroupsIndexPage() {
     }
   };
 
+  const reachedLimit = !canExceedLimit && ownedCount >= MAX_FREE_GROUPS;
+
   return (
     <Box sx={{ maxWidth: 960, mx: "auto", px: 2, py: 3 }}>
       <Stack
         direction="row"
         justifyContent="space-between"
         alignItems="center"
-        sx={{ mb: 2 }}
+        sx={{ mb: 1.5 }}
       >
         <Typography variant="h5">グループ</Typography>
-        <Button variant="contained" onClick={() => setOpenCreate(true)}>
-          グループを作成
-        </Button>
+
+        <Tooltip
+          arrow
+          title={
+            reachedLimit
+              ? `無料プランでは最大 ${MAX_FREE_GROUPS} 件まで作成できます`
+              : ""
+          }
+        >
+          <span>
+            <Button
+              variant="contained"
+              onClick={() => setOpenCreate(true)}
+              disabled={reachedLimit || limitsLoading}
+            >
+              グループを作成
+            </Button>
+          </span>
+        </Tooltip>
       </Stack>
+
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{ mb: 2, display: "block" }}
+      >
+        {limitsLoading
+          ? "作成上限を確認中…"
+          : `自分がオーナーのグループ: ${ownedCount}/${MAX_FREE_GROUPS}${
+              canExceedLimit ? "（上限解除中）" : ""
+            }`}
+      </Typography>
 
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mb: 2 }}>
         <TextField
@@ -227,6 +320,12 @@ export default function GroupsIndexPage() {
       <Dialog open={openCreate} onClose={() => setOpenCreate(false)}>
         <DialogTitle>グループを作成</DialogTitle>
         <DialogContent>
+          {!canExceedLimit && (
+            <Alert severity={reachedLimit ? "warning" : "info"} sx={{ mb: 2 }}>
+              無料プランでは最大 {MAX_FREE_GROUPS} 件まで作成できます。
+              {reachedLimit && " 既に上限に達しています。"}
+            </Alert>
+          )}
           <TextField
             autoFocus
             margin="dense"
@@ -241,7 +340,7 @@ export default function GroupsIndexPage() {
           <Button
             variant="contained"
             onClick={createGroup}
-            disabled={!newName.trim()}
+            disabled={!newName.trim() || reachedLimit}
           >
             作成
           </Button>

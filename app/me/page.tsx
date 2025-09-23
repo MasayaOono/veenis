@@ -1,7 +1,7 @@
 // app/me/page.tsx
 "use client";
-import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { useEffect, useMemo, useState } from "react";
+import { createClient } from "@/lib/supabase";
 import {
   Avatar,
   Box,
@@ -68,6 +68,7 @@ type FeedPost = {
 const OVERVIEW_PREVIEW_LIMIT = 5;
 
 export default function MePage() {
+  const supabase = useMemo(() => createClient(), []);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [groups, setGroups] = useState<GroupRow[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
@@ -206,15 +207,15 @@ export default function MePage() {
       }
 
       // visibility=group & group_id ∈ 所属グループ のみ
-      const { data, error } = await supabase
+      // ① 余計な excerpt は SELECT しない。代わりに body_md を取る
+      const { data: posts, error } = await supabase
         .from("posts")
         .select(
           `
-          id, title, slug, excerpt, cover_image_url, published_at, read_minutes,
-          author_id,
-          profiles:author_id ( username, display_name, avatar_url ),
-          post_likes(count)
-        `
+    id, title, slug, body_md, cover_image_url, published_at, read_minutes,
+    author_id,
+    post_likes(count)
+  `
         )
         .eq("is_published", true)
         .eq("visibility", "group")
@@ -228,24 +229,46 @@ export default function MePage() {
         return;
       }
 
-      // 取得形を FeedPost に整形
-      const rows = (data ?? []).map((r: any) => ({
-        id: r.id,
-        title: r.title,
-        slug: r.slug,
-        excerpt: r.excerpt ?? "",
-        cover_image_url: r.cover_image_url ?? null,
-        published_at: r.published_at ?? null,
-        read_minutes: r.read_minutes ?? null,
-        author_id: r.author_id,
-        author_username: r.profiles?.username ?? null,
-        author_display_name: r.profiles?.display_name ?? null,
-        author_avatar_url: r.profiles?.avatar_url ?? null,
-        like_count: Array.isArray(r.post_likes)
-          ? r.post_likes[0]?.count ?? 0
-          : 0,
-      })) as FeedPost[];
+      // ② 著者プロフィールまとめて取得
+      const authorIds = Array.from(
+        new Set((posts ?? []).map((p) => p.author_id))
+      );
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("user_id, username, display_name, avatar_url")
+        .in("user_id", authorIds);
+      const profMap = new Map((profs ?? []).map((p) => [p.user_id, p]));
 
+      // ③ 本文から excerpt を生成してマージ
+      const stripMd = (md: string) =>
+        (md || "")
+          .replace(/```[\s\S]*?```/g, "")
+          .replace(/`[^`]*`/g, "")
+          .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
+          .replace(/\[[^\]]*\]\([^)]+\)/g, "")
+          .replace(/[#>*_~>-]/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+
+      const rows = (posts ?? []).map((r: any) => {
+        const prof = profMap.get(r.author_id);
+        return {
+          id: r.id,
+          title: r.title,
+          slug: r.slug,
+          excerpt: stripMd(r.body_md ?? "").slice(0, 120), // ← ここで生成
+          cover_image_url: r.cover_image_url ?? null,
+          published_at: r.published_at ?? null,
+          read_minutes: r.read_minutes ?? null,
+          author_id: r.author_id,
+          author_username: prof?.username ?? null,
+          author_display_name: prof?.display_name ?? null,
+          author_avatar_url: prof?.avatar_url ?? null,
+          like_count: Array.isArray(r.post_likes)
+            ? r.post_likes[0]?.count ?? 0
+            : 0,
+        };
+      });
       setGroupPreview(rows);
     };
 
@@ -368,7 +391,7 @@ export default function MePage() {
                     <Card key={p.id} variant="outlined">
                       <CardActionArea
                         component={NextLink}
-                        href={`/posts/${p.slug}`}
+                        href={`/posts/${p.id}`}
                       >
                         <CardContent>
                           <Stack
@@ -424,7 +447,7 @@ export default function MePage() {
                       <Card key={p.id} variant="outlined">
                         <CardActionArea
                           component={NextLink}
-                          href={`/posts/${p.slug}`}
+                          href={`/posts/${p.id}`}
                         >
                           <CardContent>
                             <Stack

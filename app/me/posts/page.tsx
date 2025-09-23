@@ -1,8 +1,8 @@
 "use client";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import NextLink from "next/link";
-import { supabase } from "@/lib/supabaseClient";
+import { createClient } from "@/lib/supabase";
 import {
   Box,
   Stack,
@@ -31,6 +31,8 @@ type MyPost = {
 const LIST_LIMIT = 10;
 
 export default function MyPostsPage() {
+  const supabase = useMemo(() => createClient(), []);
+
   const search = useSearchParams();
   const router = useRouter();
   const page = Math.max(1, parseInt(search.get("page") ?? "1", 10));
@@ -110,7 +112,7 @@ export default function MyPostsPage() {
         <Stack spacing={1}>
           {rows.map((p) => (
             <Card key={p.id} variant="outlined">
-              <CardActionArea component={NextLink} href={`/posts/${p.slug}`}>
+              <CardActionArea component={NextLink} href={`/posts/${p.id}`}>
                 <CardContent>
                   <Stack
                     direction="row"

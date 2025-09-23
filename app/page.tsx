@@ -1,6 +1,6 @@
 // app/posts/page.tsx
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import NextLink from "next/link";
 import {
@@ -21,8 +21,7 @@ import {
   useTheme,
 } from "@mui/material";
 import PostCard from "@/app/_components/PostCard";
-import { supabase } from "@/lib/supabaseClient";
-
+import { createClient } from "@/lib/supabase";
 type FeedPost = {
   id: string;
   title: string;
@@ -220,6 +219,7 @@ function AppIntro() {
 /* ----------------------------------------------------------- */
 
 export default function PostsIndexPage() {
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -343,7 +343,6 @@ export default function PostsIndexPage() {
             <PostCard
               key={p.id}
               title={p.title}
-              slug={p.slug}
               cover_image_url={p.cover_image_url}
               likeCount={p.like_count ?? 0}
               author={{

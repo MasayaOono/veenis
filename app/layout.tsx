@@ -1,16 +1,18 @@
 // app/layout.tsx
 import type { Metadata } from "next";
 import Providers from "./providers";
-import Header from "./_components/Header";
-import { Container } from "@mui/material";
-import "./globals.css";
 import { Suspense } from "react";
-import Footer from "./_components/Footer";
-
+import ClientFrame from "./_components/ClientFrame";
+import "./globals.css";
+import AuthListener from "./_components/AuthListner";
 const site =
-  process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || "https://veenis.vercel.app";
+  process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
+  "https://veenis.vercel.app";
 
-export const metadata: Metadata = { title: "Veenis", metadataBase: new URL(site), };
+export const metadata: Metadata = {
+  title: "Veenis",
+  metadataBase: new URL(site),
+};
 
 export default function RootLayout({
   children,
@@ -22,19 +24,9 @@ export default function RootLayout({
       {/* body をフレックス親にするのは globals.css 側で実施 */}
       <body className="layout-root">
         <Suspense fallback={null}>
+          <AuthListener />
           <Providers>
-            <Header />
-            {/* ここを main でラップして、flex伸縮の“本体”にする */}
-            <main className="site-main">
-              <Container
-                maxWidth={false}
-                disableGutters
-                sx={{ py: 3, px: { xs: 2, sm: 3 } }}
-              >
-                {children}
-              </Container>
-            </main>
-            <Footer />
+            <ClientFrame>{children}</ClientFrame>
           </Providers>
         </Suspense>
       </body>

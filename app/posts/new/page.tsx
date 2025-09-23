@@ -1,8 +1,7 @@
-// app/posts/new/page.tsx
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   Box,
@@ -15,7 +14,6 @@ import {
   InputLabel,
   FormControl,
   Chip,
-  Link,
   IconButton,
   Paper,
   Divider,
@@ -32,6 +30,11 @@ import {
   FormControlLabel,
   InputBase,
   TextField,
+  useMediaQuery,
+  Fab,
+  Drawer,
+  AppBar,
+  Toolbar,
 } from "@mui/material";
 import NextLink from "next/link";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
@@ -39,9 +42,13 @@ import MenuBookIcon from "@mui/icons-material/MenuBook";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import TocIcon from "@mui/icons-material/Toc";
-import { supabase } from "@/lib/supabaseClient";
+import MenuIcon from "@mui/icons-material/Menu";
+import PublishIcon from "@mui/icons-material/Publish";
+import { createClient } from "@/lib/supabase";
 import { slugify } from "@/utils/slugify";
 import type { RichEditorHandle } from "@/app/_components/RichEditor";
+import LeaveConfirmDialog from "@/app/_components/LeaveConfirmDialog";
+import { useLeaveConfirm } from "@/app/_hooks/useLeaveConfirm";
 
 const RichEditor = dynamic(() => import("@/app/_components/RichEditor"), {
   ssr: false,
@@ -110,7 +117,11 @@ const SAMPLES: { label: string; md: string }[] = [
 ];
 
 export default function NewPostPage() {
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
+  const isSmDown = useMediaQuery("(max-width:600px)");
+  const isMdDown = useMediaQuery("(max-width:900px)");
+
   const editorRef = useRef<RichEditorHandle>(null);
   const coverInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -142,9 +153,10 @@ export default function NewPostPage() {
   const [err, setErr] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
-  // サイドメニュー：初期は開いた状態（目次）
-  const [menuExpanded, setMenuExpanded] = useState(true);
+  // サイド（目次/テンプレ）
+  const [menuExpanded, setMenuExpanded] = useState(true); // PC用
   const [panelMode, setPanelMode] = useState<"toc" | "tpl">("toc");
+  const [sideOpen, setSideOpen] = useState(false); // モバイルDrawer
 
   // 上書き確認（テンプレ挿入）
   const [confirmOverwriteOpen, setConfirmOverwriteOpen] = useState(false);
@@ -157,7 +169,18 @@ export default function NewPostPage() {
   >("draft");
   const [groupId, setGroupId] = useState<string>("");
 
-  // 認証＋所属グループ
+  const [isDirty, setIsDirty] = useState(false);
+  useEffect(() => {
+    const dirty =
+      !!title.trim() ||
+      !!body.trim() ||
+      !!coverFile ||
+      editorRef.current?.hasPendingUploads?.() === true;
+    setIsDirty(dirty);
+  }, [title, body, coverFile]);
+
+  // // 認証＋所属グループ
+  // NewPostPage 内
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -167,10 +190,13 @@ export default function NewPostPage() {
         return;
       }
       setUid(u.id);
+
+      // 所属グループ（必要なら）
       const { data: gms } = await supabase
         .from("group_members")
         .select("group_id")
         .eq("user_id", u.id);
+
       const ids = (gms ?? []).map((x: any) => x.group_id);
       if (ids.length) {
         const { data: gs } = await supabase
@@ -180,7 +206,7 @@ export default function NewPostPage() {
         setGroups((gs ?? []) as Group[]);
       }
     })();
-  }, [router]);
+  }, [router, supabase]);
 
   // ストレージ共通
   const uploadToSupabase = async (file: File) => {
@@ -220,11 +246,31 @@ export default function NewPostPage() {
     if (coverInputRef.current) coverInputRef.current.value = "";
   };
 
+  // state を追加
+  const [hasBody, setHasBody] = useState(false);
+
+  // 本文の実質空チェック用ハンドラを追加
+  const onEditorChange = useCallback((md: string) => {
+    setBody(md);
+    const textish = md.replace(/[`*_#>\-\[\]\(\)!]/g, "").replace(/\s+/g, "");
+    setHasBody(textish.length > 0);
+  }, []);
+
   // ===== 投稿保存ロジック =====
   const doSubmit = async () => {
     setErr(null);
     setInfo(null);
-    if (!uid) return;
+    // uid がなければ最終確認
+    let userId = uid;
+    if (!userId) {
+      const { data } = await supabase.auth.getUser();
+      userId = data.user?.id ?? null;
+      if (!userId) {
+        router.replace("/auth/login?next=/posts/new");
+        return;
+      }
+      setUid(userId);
+    }
 
     if (visDraft === "group" && !groupId) {
       setErr("グループ限定公開を選択した場合は、グループを選んでください。");
@@ -250,16 +296,17 @@ export default function NewPostPage() {
     }
 
     let slug = slugify(title || "untitled");
+
     const baseInsert = async () => {
       const isPublished = visDraft !== "draft";
       const linkToken = visDraft === "link" ? randomBase64Url(20) : null;
       const { data, error } = await supabase
         .from("posts")
         .insert({
-          author_id: uid,
+          author_id: userId,
           title,
           slug,
-          body_md: finalMd,
+          body_md: finalMd, // ← あなたのスキーマに合わせた列名を使用
           cover_image_url: coverUrl,
           visibility: visDraft,
           link_token: linkToken,
@@ -300,13 +347,13 @@ export default function NewPostPage() {
     setPublishOpen(false);
 
     if (visDraft === "link") {
-      const share = `${window.location.origin}/posts/${data!.slug}?token=${
+      const share = `${window.location.origin}/posts/${data!.id}?token=${
         data!.link_token
       }`;
       await navigator.clipboard.writeText(share).catch(() => {});
-      router.replace(`/posts/${data!.slug}?token=${data!.link_token}`);
+      router.replace(`/posts/${data!.id}?token=${data!.link_token}`);
     } else {
-      router.replace(`/posts/${data!.slug}`);
+      router.replace(`/posts/${data!.id}`);
     }
   };
 
@@ -352,30 +399,243 @@ export default function NewPostPage() {
     setConfirmOverwriteOpen(false);
   };
 
+  const saveDraftOnly = useCallback(async () => {
+    if (!uid) throw new Error("auth required");
+
+    setErr(null);
+    setSaving(true);
+
+    const finalMd =
+      (await editorRef.current?.exportMarkdownWithUploads(uploadToSupabase)) ??
+      body;
+    const readMinutes = estimateReadMinutes(finalMd);
+
+    let coverUrl: string | null = null;
+    if (coverFile) {
+      coverUrl = await uploadToSupabase(coverFile);
+    }
+
+    let slug = slugify(title || "untitled");
+    const baseInsert = async () => {
+      const { data, error } = await supabase
+        .from("posts")
+        .insert({
+          author_id: uid,
+          title,
+          slug,
+          body_md: finalMd,
+          cover_image_url: coverUrl,
+          visibility: "draft",
+          link_token: null,
+          group_id: null,
+          is_published: false,
+          read_minutes: readMinutes,
+          published_at: null,
+        })
+        .select("id, slug")
+        .single();
+      return { data, error };
+    };
+
+    let { data, error } = await baseInsert();
+    if (error && (error as any).code === "23505") {
+      slug = `${slug}-${Date.now().toString(36).slice(-4)}`;
+      ({ data, error } = await baseInsert());
+    }
+    if (error) {
+      setSaving(false);
+      setErr(error.message || "下書き保存に失敗しました。");
+      throw error;
+    }
+
+    setSaving(false);
+    setInfo("下書きとして保存しました。");
+    return data;
+  }, [uid, title, body, coverFile, uploadToSupabase]);
+
+  const leave = useLeaveConfirm({
+    isDirty,
+    onSaveDraft: saveDraftOnly,
+    canSave: !!uid,
+  });
+
   // ===== レイアウト寸法 =====
   const railW = 72;
   const paneW = 300;
   const editorMax = 780;
   const sideW = menuExpanded ? railW + paneW : railW;
+
+  // サイドパネルの中身（PC / Drawer 共用）
+  const SidePanel = (
+    <Box
+      sx={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+        bgcolor: "rgba(255,255,255,0.7)",
+        backdropFilter: "saturate(180%) blur(12px)",
+      }}
+    >
+      {/* ヘッダー */}
+      <Stack
+        direction="row"
+        alignItems="center"
+        justifyContent="space-between"
+        sx={{ p: 1 }}
+      >
+        <Typography variant="subtitle2" color="text.secondary">
+          {panelMode === "toc" ? "目次" : "テンプレート"}
+        </Typography>
+        <Tooltip title="閉じる">
+          <IconButton
+            size="small"
+            onClick={() => {
+              if (isSmDown) setSideOpen(false);
+              else setMenuExpanded(false);
+            }}
+          >
+            <ChevronLeftIcon />
+          </IconButton>
+        </Tooltip>
+      </Stack>
+
+      <Divider />
+
+      {/* 中身 */}
+      <Box sx={{ flex: 1, overflow: "auto" }}>
+        {panelMode === "toc" ? (
+          <List dense sx={{ py: 0.5 }}>
+            {toc.length === 0 && (
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ px: 2, py: 1 }}
+              >
+                見出し（# / ## / ###）を入力すると目次が表示されます
+              </Typography>
+            )}
+            {toc.map((t, idx) => (
+              <ListItemButton
+                key={`${t.level}-${idx}-${t.text}`}
+                onClick={() => {
+                  scrollToHeading(idx);
+                  if (isSmDown) setSideOpen(false);
+                }}
+                sx={{
+                  pl: t.level === 1 ? 1.5 : t.level === 2 ? 3 : 4.5,
+                  py: 0.75,
+                }}
+              >
+                <ListItemText
+                  primary={t.text}
+                  primaryTypographyProps={{
+                    noWrap: true,
+                    title: t.text,
+                    fontSize:
+                      t.level === 1
+                        ? "0.95rem"
+                        : t.level === 2
+                        ? "0.9rem"
+                        : "0.85rem",
+                    fontWeight: t.level === 1 ? 700 : 500,
+                  }}
+                />
+              </ListItemButton>
+            ))}
+          </List>
+        ) : (
+          <List dense sx={{ py: 0.5 }}>
+            {SAMPLES.map((s) => (
+              <ListItemButton
+                key={s.label}
+                disableRipple
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr auto",
+                  alignItems: "center",
+                  columnGap: 1,
+                  py: 0.75,
+                  cursor: "default",
+                }}
+              >
+                <ListItemText
+                  primary={s.label}
+                  primaryTypographyProps={{
+                    noWrap: true,
+                    title: s.label,
+                  }}
+                />
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => tryInsertTemplate(s.md)}
+                >
+                  挿入
+                </Button>
+              </ListItemButton>
+            ))}
+          </List>
+        )}
+      </Box>
+    </Box>
+  );
+
   return (
-    <Box sx={{ position: "relative" }}>
-      {/* グリッド：左サイド（ハンバーガー風） + 右メイン */}
+    <Box
+      sx={{
+        position: "relative",
+        // iOS下部安全域 + FAB分の余白
+        pb: { xs: "calc(64px + env(safe-area-inset-bottom))", sm: 2 },
+      }}
+    >
+      {/* ====== モバイル時：上部にツール開閉ボタン（AppBar） ====== */}
+      {isSmDown && (
+        <AppBar
+          elevation={0}
+          color="default"
+          position="sticky"
+          sx={{
+            top: 0,
+            borderBottom: (t) => `1px solid ${t.palette.divider}`,
+            bgcolor: "background.paper",
+            pt: "env(safe-area-inset-top)",
+          }}
+        >
+          <Toolbar sx={{ minHeight: 48, gap: 1 }}>
+            <IconButton onClick={() => setSideOpen(true)}>
+              <MenuIcon />
+            </IconButton>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700, flex: 1 }}>
+              新規投稿
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {`読了 ${estimateReadMinutes(body)}分`}
+            </Typography>
+          </Toolbar>
+        </AppBar>
+      )}
+
+      {/* ====== メイングリッド（sm以下は1カラム） ====== */}
       <Box
         sx={{
           display: "grid",
-          gridTemplateColumns: `${sideW}px 1fr`,
+          gridTemplateColumns: {
+            xs: "1fr",
+            sm: `${sideW}px 1fr`,
+          },
           gap: 2,
-          transition: "grid-template-columns .2s ease",
           alignItems: "start",
+          transition: "grid-template-columns .2s ease",
         }}
       >
-        {/* === 左サイド（縦アイコンレール + 右にカード） === */}
+        {/* === 左サイド（PC：レール+カード / モバイル：非表示） === */}
         <Box
           sx={{
+            display: { xs: "none", sm: "grid" },
             position: "sticky",
             top: 88,
             height: "calc(100dvh - 136px)",
-            display: "grid",
             gridTemplateColumns: `${railW}px ${menuExpanded ? paneW : 0}px`,
             gap: 1,
             transition: "grid-template-columns .2s ease",
@@ -426,141 +686,72 @@ export default function NewPostPage() {
             </Tooltip>
           </Paper>
 
-          {/* 右のカード（開いたときだけ表示） */}
-          {menuExpanded && (
-            <Paper
-              variant="outlined"
-              sx={{
-                height: "100%",
-                display: "flex",
-                flexDirection: "column",
-                overflow: "hidden",
-                bgcolor: "rgba(255,255,255,0.7)",
-                backdropFilter: "saturate(180%) blur(12px)",
-              }}
-            >
-              {/* ヘッダー：タイトル + 右上「閉じる」 */}
-              <Stack
-                direction="row"
-                alignItems="center"
-                justifyContent="space-between"
-                sx={{ p: 1 }}
-              >
-                <Typography variant="subtitle2" color="text.secondary">
-                  {panelMode === "toc" ? "目次" : "テンプレート"}
-                </Typography>
-                <Tooltip title="閉じる">
-                  <IconButton
-                    size="small"
-                    onClick={() => setMenuExpanded(false)}
-                  >
-                    <ChevronLeftIcon />
-                  </IconButton>
-                </Tooltip>
-              </Stack>
-
-              <Divider />
-
-              {/* 中身 */}
-              <Box sx={{ flex: 1, overflow: "auto" }}>
-                {panelMode === "toc" ? (
-                  // 目次：見出しテキストをそのまま表示
-                  <List dense sx={{ py: 0.5 }}>
-                    {toc.length === 0 && (
-                      <Typography
-                        variant="caption"
-                        color="text.secondary"
-                        sx={{ px: 2, py: 1 }}
-                      >
-                        見出し（# / ## / ###）を入力すると目次が表示されます
-                      </Typography>
-                    )}
-                    {toc.map((t, idx) => (
-                      <ListItemButton
-                        key={`${t.level}-${idx}-${t.text}`}
-                        onClick={() => scrollToHeading(idx)}
-                        sx={{
-                          pl: t.level === 1 ? 1.5 : t.level === 2 ? 3 : 4.5,
-                          py: 0.75,
-                        }}
-                      >
-                        <ListItemText
-                          primary={t.text}
-                          primaryTypographyProps={{
-                            noWrap: true,
-                            title: t.text,
-                            fontSize:
-                              t.level === 1
-                                ? "0.95rem"
-                                : t.level === 2
-                                ? "0.9rem"
-                                : "0.85rem",
-                            fontWeight: t.level === 1 ? 700 : 500,
-                          }}
-                        />
-                      </ListItemButton>
-                    ))}
-                  </List>
-                ) : (
-                  // テンプレ：ラベル + 「挿入」ボタンのみ
-                  <List dense sx={{ py: 0.5 }}>
-                    {SAMPLES.map((s) => (
-                      <ListItemButton
-                        key={s.label}
-                        disableRipple
-                        sx={{
-                          display: "grid",
-                          gridTemplateColumns: "1fr auto",
-                          alignItems: "center",
-                          columnGap: 1,
-                          py: 0.75,
-                          cursor: "default",
-                        }}
-                      >
-                        <ListItemText
-                          primary={s.label}
-                          primaryTypographyProps={{
-                            noWrap: true,
-                            title: s.label,
-                          }}
-                        />
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          onClick={() => tryInsertTemplate(s.md)}
-                        >
-                          挿入
-                        </Button>
-                      </ListItemButton>
-                    ))}
-                  </List>
-                )}
-              </Box>
-            </Paper>
-          )}
+          {/* パネル本体 */}
+          {menuExpanded && <Paper variant="outlined">{SidePanel}</Paper>}
         </Box>
 
         {/* === 右メイン（タイトル + エディタ） === */}
         <Box>
-          {/* 操作バー */}
-          <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 1 }}>
+          {/* 操作バー（PC表示） */}
+          <Stack
+            direction="row"
+            spacing={2}
+            alignItems="center"
+            sx={{ mb: 1, display: { xs: "none", sm: "flex" } }}
+          >
             <Box sx={{ flex: 1 }} />
             <Typography variant="body2" color="text.secondary">
               読了目安: {estimateReadMinutes(body)} 分
             </Typography>
             <Button
+              component={NextLink}
+              href="/me"
+              variant="outlined"
+              color="inherit"
+              sx={{ mr: 1 }}
+            >
+              閉じる
+            </Button>
+            <Button
               variant="contained"
               onClick={() => setPublishOpen(true)}
-              disabled={saving || !title || !body}
+              disabled={saving || !title.trim() || !hasBody}
             >
               保存 / 公開
             </Button>
-            <Link component={NextLink} href="/posts">
-              一覧へ戻る
-            </Link>
           </Stack>
 
-          {/* タイトル（枠線なし） */}
+          {/* モバイル：上に「ツールを開く」ボタン（必要なら） */}
+          {isSmDown && (
+            <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 1 }}>
+              <Stack direction="row" spacing={1}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<TocIcon />}
+                  onClick={() => {
+                    setPanelMode("toc");
+                    setSideOpen(true);
+                  }}
+                >
+                  目次
+                </Button>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<MenuBookIcon />}
+                  onClick={() => {
+                    setPanelMode("tpl");
+                    setSideOpen(true);
+                  }}
+                >
+                  テンプレ
+                </Button>
+              </Stack>
+            </Box>
+          )}
+
+          {/* タイトル */}
           <Box sx={{ mb: 1.5, display: "flex", justifyContent: "center" }}>
             <InputBase
               value={title}
@@ -589,7 +780,7 @@ export default function NewPostPage() {
               <RichEditor
                 ref={editorRef}
                 valueMd={body}
-                onChangeMd={setBody}
+                onChangeMd={onEditorChange}
                 placeholder="大見出し、引用、リスト、画像、リンクに対応。画像は保存時に自動アップロードされます。"
               />
             </Box>
@@ -629,15 +820,25 @@ export default function NewPostPage() {
         </DialogActions>
       </Dialog>
 
-      {/* 公開方法 + タグ + カバー画像（ダイアログ内） */}
+      {/* 公開方法 + タグ + カバー画像（sm以下はフルスクリーン） */}
       <Dialog
         open={publishOpen}
         onClose={() => setPublishOpen(false)}
         fullWidth
         maxWidth="sm"
+        fullScreen={isSmDown}
+        PaperProps={{
+          sx: isSmDown ? { pt: "env(safe-area-inset-top)" } : undefined,
+        }}
       >
         <DialogTitle>公開方法を選択</DialogTitle>
-        <DialogContent>
+        <DialogContent
+          dividers
+          sx={{
+            maxHeight: isSmDown ? "unset" : "70vh",
+            overflow: "auto",
+          }}
+        >
           <RadioGroup
             value={visDraft}
             onChange={(e) => setVisDraft(e.target.value as any)}
@@ -654,14 +855,14 @@ export default function NewPostPage() {
               label="完全公開"
             />
             <FormControlLabel
-              value="link"
-              control={<Radio />}
-              label="リンク限定公開"
-            />
-            <FormControlLabel
               value="group"
               control={<Radio />}
               label="グループ限定公開"
+            />
+            <FormControlLabel
+              value="link"
+              control={<Radio />}
+              label="リンク限定（URLを知っている人のみ）"
             />
           </RadioGroup>
 
@@ -755,12 +956,12 @@ export default function NewPostPage() {
               onChange={handleCoverChange}
             />
           </Box>
-
-          <Alert severity="info" sx={{ mt: 3 }}>
-            リンク限定はURLを知っている人だけが閲覧できます。作成後、共有URLを自動でコピーします。
-          </Alert>
         </DialogContent>
-        <DialogActions>
+        <DialogActions
+          sx={{
+            pb: isSmDown ? "calc(8px + env(safe-area-inset-bottom))" : 2,
+          }}
+        >
           <Button onClick={() => setPublishOpen(false)}>戻る</Button>
           <Button
             onClick={doSubmit}
@@ -771,6 +972,72 @@ export default function NewPostPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* ====== モバイル：公開FAB（親指タップ） ====== */}
+      {isSmDown && (
+        <Fab
+          color="primary"
+          onClick={() => setPublishOpen(true)}
+          sx={{
+            position: "fixed",
+            right: 16,
+            bottom: "calc(16px + env(safe-area-inset-bottom))",
+            zIndex: 1200,
+          }}
+          aria-label="publish"
+        >
+          <PublishIcon />
+        </Fab>
+      )}
+
+      {/* ====== モバイル：サイドDrawer（目次/テンプレ） ====== */}
+      <Drawer
+        anchor="left"
+        open={sideOpen}
+        onClose={() => setSideOpen(false)}
+        PaperProps={{
+          sx: {
+            width: Math.min(
+              360,
+              typeof window !== "undefined" ? window.innerWidth * 0.9 : 320
+            ),
+          },
+        }}
+      >
+        {/* Drawerヘッダー（モード切替） */}
+        <Box sx={{ display: "flex", alignItems: "center", p: 1, gap: 1 }}>
+          <Button
+            size="small"
+            startIcon={<TocIcon />}
+            variant={panelMode === "toc" ? "contained" : "outlined"}
+            onClick={() => setPanelMode("toc")}
+          >
+            目次
+          </Button>
+          <Button
+            size="small"
+            startIcon={<MenuBookIcon />}
+            variant={panelMode === "tpl" ? "contained" : "outlined"}
+            onClick={() => setPanelMode("tpl")}
+          >
+            テンプレ
+          </Button>
+          <Box sx={{ flex: 1 }} />
+          <IconButton onClick={() => setSideOpen(false)}>
+            <ChevronRightIcon />
+          </IconButton>
+        </Box>
+        <Divider />
+        {SidePanel}
+      </Drawer>
+      <LeaveConfirmDialog
+        open={leave.dialogOpen}
+        canSave={leave.canSave}
+        isSaving={leave.isSaving}
+        onCancel={leave.cancelLeave}
+        onDiscard={leave.confirmDiscardAndLeave}
+        onSaveAndLeave={leave.confirmSaveAndLeave}
+      />
     </Box>
   );
 }

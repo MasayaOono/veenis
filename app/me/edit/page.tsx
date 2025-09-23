@@ -1,7 +1,6 @@
 // app/me/edit/page.tsx
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
 import {
   Avatar,
   Box,
@@ -23,6 +22,7 @@ import {
 } from "@mui/material";
 import NextLink from "next/link";
 import Grid from "@mui/material/Grid"; // v7 Grid v2
+import { createClient } from "@/lib/supabase";
 
 type Profile = {
   user_id: string;
@@ -49,6 +49,7 @@ const JOB_OPTIONS = [
 ];
 
 export default function EditProfilePage() {
+  const supabase = useMemo(() => createClient(), []);
   const [uid, setUid] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

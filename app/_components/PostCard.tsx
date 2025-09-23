@@ -15,14 +15,14 @@ import NextLink from "next/link";
 import { getPlaceholderCoverDataUrl } from "@/utils/placeholderCover";
 
 export default function PostCard({
+  id,
   title,
-  slug,
   cover_image_url,
   likeCount,
   author,
 }: {
+  id?: string;
   title: string;
-  slug: string;
   cover_image_url?: string | null;
   likeCount?: number;
   author?: {
@@ -31,7 +31,7 @@ export default function PostCard({
     avatar_url?: string | null;
   };
 }) {
-  const image = cover_image_url || getPlaceholderCoverDataUrl(title, slug);
+  const image = cover_image_url || getPlaceholderCoverDataUrl(title);
   const userHref = author?.username ? `/users/${author.username}` : undefined;
 
   return (
@@ -51,7 +51,7 @@ export default function PostCard({
       {/* 全面オーバーレイのリンク（カード全体クリックで遷移） */}
       <Box
         component={NextLink}
-        href={`/posts/${slug}`}
+        href={`/posts/${id}`}
         aria-label={`記事「${title}」へ移動`}
         sx={{
           position: "absolute",

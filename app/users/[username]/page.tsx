@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { createClient } from "@/lib/supabase";
 import {
   Avatar,
   Box,
@@ -52,6 +52,8 @@ type RawGroupRow = {
 };
 
 export default function UserProfilePage() {
+  const supabase = useMemo(() => createClient(), []);
+
   const { username } = useParams<{ username: string }>();
 
   const [meId, setMeId] = useState<string | null>(null);
@@ -280,7 +282,6 @@ export default function UserProfilePage() {
             <PostCard
               key={p.id}
               title={p.title}
-              slug={p.slug}
               cover_image_url={p.cover_image_url}
               likeCount={0} // ← ダミー値（PostCard 側で省略可にしてもOK）
               author={{

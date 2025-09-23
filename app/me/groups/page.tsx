@@ -1,8 +1,8 @@
 "use client";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import NextLink from "next/link";
-import { supabase } from "@/lib/supabaseClient";
+import { createClient } from "@/lib/supabase";
 import {
   Box,
   Stack,
@@ -33,6 +33,7 @@ type FeedPost = {
 const LIMIT = 10;
 
 export default function GroupFeedPage() {
+  const supabase = useMemo(() => createClient(), []);
   const search = useSearchParams();
   const router = useRouter();
   const page = Math.max(1, parseInt(search.get("page") ?? "1", 10));

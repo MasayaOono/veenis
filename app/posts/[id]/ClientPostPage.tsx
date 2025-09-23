@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useSearchParams, useParams, useRouter } from "next/navigation";
 import NextLink from "next/link";
-import { supabase } from "@/lib/supabaseClient";
+import { createClient } from "@/lib/supabase";
 import {
   Box,
   Typography,
@@ -35,33 +36,44 @@ import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import Script from "next/script";
 import { buildToc, toId } from "@/utils/toc";
-import { buildSlugVariants } from "@/utils/slugVariants";
 import ContentColumn from "@/app/_components/ContentColumn";
+import Comments from "./Comments";
 
-type PostRow = any;
+type PostRow = {
+  id: string;
+  title: string;
+  body_md: string;
+  author_id: string;
+  cover_image_url: string | null;
+  published_at: string | null;
+  updated_at: string | null;
+  visibility: "draft" | "public" | "group" | "link";
+};
 
 export default function ClientPostPage() {
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
-  const { slug } = useParams<{ slug: string }>();
+
+  const { id } = useParams<{ id: string }>();
   const params = useSearchParams();
-  const token = params.get("token");
+  const token = params.get("token") || undefined;
 
   const [post, setPost] = useState<PostRow | null>(null);
+  const [author, setAuthor] = useState<{
+    username?: string | null;
+    display_name?: string | null;
+    avatar_url?: string | null;
+  } | null>(null);
+
+  const [me, setMe] = useState<string | null>(null);
+  const [isFollowing, setIsFollowing] = useState(false);
+
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [author, setAuthor] = useState<{
-    username?: string;
-    display_name?: string;
-    avatar_url?: string;
-  } | null>(null);
   const [isOwner, setIsOwner] = useState(false);
 
-  // 削除UI
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [busyDelete, setBusyDelete] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // 共有UI
   const [shareEl, setShareEl] = useState<null | HTMLElement>(null);
@@ -70,15 +82,20 @@ export default function ClientPostPage() {
     setShareEl(e.currentTarget);
   const closeShare = () => setShareEl(null);
 
+  // 削除UI
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [busyDelete, setBusyDelete] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
   const shareUrl = useMemo(() => {
     if (!post) return "";
     const base = typeof window !== "undefined" ? window.location.origin : "";
-    return `${base}/posts/${encodeURIComponent(post.slug)}${
-      token ? `?token=${token}` : ""
+    return `${base}/posts/${encodeURIComponent(post.id)}${
+      token ? `?token=${encodeURIComponent(token)}` : ""
     }`;
   }, [post, token]);
 
-  const doCopy = async () => {
+  const copyShareUrl = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(shareUrl);
       setToast("リンクをコピーしました");
@@ -87,8 +104,9 @@ export default function ClientPostPage() {
     } finally {
       closeShare();
     }
-  };
-  const doWebShare = async () => {
+  }, [shareUrl]);
+
+  const webShare = useCallback(async () => {
     try {
       if (navigator.share) {
         await navigator.share({
@@ -105,8 +123,9 @@ export default function ClientPostPage() {
     } finally {
       closeShare();
     }
-  };
-  const openX = () => {
+  }, [post?.title, shareUrl]);
+
+  const openX = useCallback(() => {
     const text = encodeURIComponent(post?.title ?? "");
     const url = encodeURIComponent(shareUrl);
     window.open(
@@ -114,35 +133,34 @@ export default function ClientPostPage() {
       "_blank"
     );
     closeShare();
-  };
+  }, [post?.title, shareUrl]);
 
+  // 投稿ロード
   useEffect(() => {
     const load = async () => {
-      if (!slug) return;
+      if (!id) {
+        setError("IDが不正です");
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       setError(null);
 
-      const variants = buildSlugVariants(slug);
       let data: PostRow | null = null;
 
       if (token) {
-        for (const v of variants) {
-          const r = await supabase.rpc("get_post_by_token", {
-            p_slug: v,
-            p_token: token,
-          });
-          if (!r.error && r.data) {
-            data = r.data;
-            break;
-          }
-        }
+        const r = await supabase.rpc("get_post_by_token_by_id", {
+          p_post_id: id,
+          p_token: token,
+        });
+        if (!r.error && r.data) data = r.data as PostRow;
       } else {
         const r = await supabase
           .from("posts")
           .select("*")
-          .in("slug", variants)
-          .maybeSingle();
-        if (!r.error) data = r.data;
+          .eq("id", id)
+          .maybeSingle<PostRow>();
+        if (!r.error) data = r.data ?? null;
       }
 
       if (!data) {
@@ -163,6 +181,35 @@ export default function ClientPostPage() {
         setAuthor(prof ?? null);
       }
 
+      // 自分の情報（いいね状態、フォロー状態、所有者判定）
+      const { data: meRes } = await supabase.auth.getUser();
+      const myId = meRes.user?.id ?? null;
+      setMe(myId);
+      setIsOwner(!!myId && myId === data.author_id);
+
+      if (myId) {
+        const mine = await supabase
+          .from("post_likes")
+          .select("post_id")
+          .eq("post_id", data.id)
+          .eq("user_id", myId)
+          .maybeSingle();
+        setLiked(!!mine.data);
+
+        if (myId !== data.author_id) {
+          const f = await supabase
+            .from("follows")
+            .select("followee_id")
+            .eq("follower_id", myId)
+            .eq("followee_id", data.author_id)
+            .maybeSingle();
+          setIsFollowing(!!f.data);
+        }
+      } else {
+        setLiked(false);
+        setIsFollowing(false);
+      }
+
       // いいね数
       {
         const likeRes = await supabase
@@ -172,59 +219,67 @@ export default function ClientPostPage() {
         setLikeCount(likeRes.count ?? 0);
       }
 
-      // 自分のいいね / 自分の投稿か判定
-      {
-        const { data: me } = await supabase.auth.getUser();
-        const myId = me.user?.id;
-        if (myId) {
-          const { data: mine } = await supabase
-            .from("post_likes")
-            .select("post_id")
-            .eq("post_id", data.id)
-            .eq("user_id", myId)
-            .maybeSingle();
-          setLiked(!!mine);
-          setIsOwner(myId === data.author_id);
-        } else {
-          setLiked(false);
-          setIsOwner(false);
-        }
-      }
-
       setLoading(false);
     };
+
     load();
-  }, [slug, token]);
+  }, [id, token, supabase]);
 
   const toc = useMemo(() => buildToc(post?.body_md ?? ""), [post?.body_md]);
 
-  const toggleLike = async () => {
+  // いいね（楽観更新）
+  const toggleLike = useCallback(async () => {
     const { data: me } = await supabase.auth.getUser();
     const uid = me.user?.id;
     if (!uid || !post?.id) return;
+
     if (!liked) {
+      setLiked(true);
+      setLikeCount((c) => c + 1);
       const { error } = await supabase
         .from("post_likes")
         .insert({ post_id: post.id, user_id: uid });
-      if (!error) {
-        setLiked(true);
-        setLikeCount((c) => c + 1);
+      if (error) {
+        setLiked(false);
+        setLikeCount((c) => Math.max(0, c - 1));
       }
     } else {
+      setLiked(false);
+      setLikeCount((c) => Math.max(0, c - 1));
       const { error } = await supabase
         .from("post_likes")
         .delete()
         .eq("post_id", post.id)
         .eq("user_id", uid);
-      if (!error) {
-        setLiked(false);
-        setLikeCount((c) => Math.max(0, c - 1));
+      if (error) {
+        setLiked(true);
+        setLikeCount((c) => c + 1);
       }
     }
-  };
+  }, [liked, post?.id, supabase]);
 
-  // 削除実行
-  const handleDelete = async () => {
+  // フォロー（楽観更新）
+  const toggleFollow = useCallback(async () => {
+    if (!me || !post?.author_id || me === post.author_id) return;
+    if (!isFollowing) {
+      setIsFollowing(true);
+      const { error } = await supabase
+        .from("follows")
+        .insert({ follower_id: me, followee_id: post.author_id });
+      if (error) setIsFollowing(false);
+    } else {
+      setIsFollowing(false);
+      const { error } = await supabase
+        .from("follows")
+        .delete()
+        .eq("follower_id", me)
+        .eq("followee_id", post.author_id);
+      if (error) setIsFollowing(true);
+    }
+  }, [me, post?.author_id, isFollowing, supabase]);
+
+  // 削除
+  const handleDelete = useCallback(async () => {
     if (!post?.id) return;
     setBusyDelete(true);
     try {
@@ -234,13 +289,11 @@ export default function ClientPostPage() {
       if (rpc.error && !/function .* does not exist/i.test(rpc.error.message)) {
         throw rpc.error;
       }
-      if (!rpc.error) {
-        setToast("記事を削除しました。");
-      } else {
+      if (rpc.error) {
         const del = await supabase.from("posts").delete().eq("id", post.id);
         if (del.error) throw del.error;
-        setToast("記事を削除しました。");
       }
+      setToast("記事を削除しました。");
       router.replace("/me");
     } catch (e: any) {
       setToast(e?.message ?? "削除に失敗しました。");
@@ -248,7 +301,7 @@ export default function ClientPostPage() {
       setBusyDelete(false);
       setConfirmOpen(false);
     }
-  };
+  }, [post?.id, router, supabase]);
 
   if (loading) return <Typography>読み込み中...</Typography>;
   if (error) return <Alert severity="error">{error}</Alert>;
@@ -258,13 +311,14 @@ export default function ClientPostPage() {
         記事が見つからないか、閲覧権限がありません。
         {token ? null : (
           <>
-            （リンク限定記事の場合は <code>?token=...</code> が必要です）
+            （リンク限定記事は <code>?token=…</code> が必要）
           </>
         )}
       </Alert>
     );
   }
 
+  // 構造化データ
   const ldJson = {
     "@context": "https://schema.org",
     "@type": "Article",
@@ -281,8 +335,8 @@ export default function ClientPostPage() {
       "@type": "WebPage",
       "@id":
         typeof window !== "undefined"
-          ? `${window.location.origin}/posts/${encodeURIComponent(post.slug)}${
-              token ? `?token=${token}` : ""
+          ? `${window.location.origin}/posts/${encodeURIComponent(post.id)}${
+              token ? `?token=${encodeURIComponent(token)}` : ""
             }`
           : "",
     },
@@ -290,22 +344,41 @@ export default function ClientPostPage() {
 
   return (
     <Box sx={{ position: "relative", display: "flex", gap: 3 }}>
-      {/* 本文（入力と同じ横幅でセンタリング） */}
+      {/* 本文 */}
       <Box sx={{ flex: 1, minWidth: 0 }}>
         <ContentColumn maxWidth={760}>
-          {/* タイトル + 右側アクション */}
-          <Stack
-            direction="row"
-            justifyContent="space-between"
-            alignItems="baseline"
-            sx={{ mb: 1 }}
+          {/* ===== タイトル＆アクション（XS/SMは縦、MD+は右上） ===== */}
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: { xs: "1fr", md: "1fr auto" },
+              gridTemplateAreas: {
+                xs: `"title" "actions"`,
+                md: `"title actions"`,
+              },
+              alignItems: { md: "center" },
+              gap: 1,
+              mb: 1,
+            }}
           >
-            <Typography variant="h3" gutterBottom sx={{ mb: 0 }}>
+            <Typography
+              variant="h3"
+              gutterBottom
+              sx={{ mb: { xs: 0.5, md: 0 }, gridArea: "title" }}
+            >
               {post.title}
             </Typography>
 
-            <Stack direction="row" spacing={1}>
-              {/* 共有ボタン：誰でも使える */}
+            <Stack
+              direction="row"
+              spacing={1}
+              flexWrap="wrap"
+              sx={{
+                gridArea: "actions",
+                justifyContent: { xs: "flex-start", md: "flex-end" },
+                "& .MuiButton-root": { whiteSpace: "nowrap" },
+              }}
+            >
               <Button
                 startIcon={<ShareIcon />}
                 variant="outlined"
@@ -315,13 +388,13 @@ export default function ClientPostPage() {
                 共有
               </Button>
               <Menu anchorEl={shareEl} open={shareOpen} onClose={closeShare}>
-                <MenuItem onClick={doWebShare}>
+                <MenuItem onClick={webShare}>
                   <ListItemIcon>
                     <ShareIcon fontSize="small" />
                   </ListItemIcon>
                   <ListItemText primary="共有（Web Share / クリップボード）" />
                 </MenuItem>
-                <MenuItem onClick={doCopy}>
+                <MenuItem onClick={copyShareUrl}>
                   <ListItemIcon>
                     <ContentCopyIcon fontSize="small" />
                   </ListItemIcon>
@@ -335,21 +408,12 @@ export default function ClientPostPage() {
                 </MenuItem>
               </Menu>
 
-              {/* 表示・編集・削除はオーナーのみ */}
               {isOwner && (
                 <>
                   <Button
                     component={NextLink}
-                    href={`/posts/${encodeURIComponent(post.slug)}`}
-                    variant="outlined"
-                    size="small"
-                  >
-                    表示へ戻る
-                  </Button>
-                  <Button
-                    component={NextLink}
-                    href={`/posts/${encodeURIComponent(post.slug)}/edit${
-                      token ? `?token=${token}` : ""
+                    href={`/posts/${encodeURIComponent(post.id)}/edit${
+                      token ? `?token=${encodeURIComponent(token)}` : ""
                     }`}
                     variant="outlined"
                     size="small"
@@ -368,10 +432,15 @@ export default function ClientPostPage() {
                 </>
               )}
             </Stack>
-          </Stack>
+          </Box>
 
-          {/* 著者情報 */}
-          <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+          {/* 著者情報 + フォロー */}
+          <Stack
+            direction="row"
+            spacing={1}
+            alignItems="center"
+            sx={{ mb: 1, flexWrap: "wrap", gap: 1 }}
+          >
             <Avatar
               src={author?.avatar_url ?? undefined}
               sx={{ width: 28, height: 28 }}
@@ -380,9 +449,21 @@ export default function ClientPostPage() {
                 author?.username?.charAt(0) ??
                 "U"}
             </Avatar>
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
               {author?.display_name || author?.username || "Unknown"}
             </Typography>
+
+            {!isOwner && (
+              <Button
+                size="small"
+                variant={isFollowing ? "outlined" : "contained"}
+                onClick={toggleFollow}
+                disabled={!me}
+                sx={{ textTransform: "none", py: 0.25 }}
+              >
+                {isFollowing ? "フォロー中" : "フォロー"}
+              </Button>
+            )}
           </Stack>
 
           {/* いいね */}
@@ -422,10 +503,13 @@ export default function ClientPostPage() {
             </ReactMarkdown>
           </Box>
 
-          {/* JSON-LD（構造化データ） */}
+          {/* 構造化データ */}
           <Script id="ld-article" type="application/ld+json">
             {JSON.stringify(ldJson)}
           </Script>
+
+          {/* コメント */}
+          <Comments postId={id} />
         </ContentColumn>
       </Box>
 

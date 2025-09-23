@@ -1,9 +1,9 @@
-// app/auth/login/page.tsx
+// app/auth/login/LoginClient.tsx
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { createClient } from "@/lib/supabase"; // ← これを使う
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase";
 import {
   Box,
   Button,
@@ -15,24 +15,23 @@ import {
 } from "@mui/material";
 import NextLink from "next/link";
 
-export default function LoginPage() {
+async function ensureProfile(supabase: ReturnType<typeof createClient>) {
+  const { data: me } = await supabase.auth.getUser();
+  const uid = me.user?.id;
+  if (!uid) return;
+  await supabase
+    .from("profiles")
+    .upsert({ user_id: uid }, { onConflict: "user_id" });
+}
+
+export default function LoginClient({ next }: { next?: string }) {
   const router = useRouter();
-  const search = useSearchParams();
-  const supabase = useMemo(() => createClient(), []); // ← ブラウザ用クライアント
+  const supabase = useMemo(() => createClient(), []);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
-  const ensureProfile = async () => {
-    const { data: me } = await supabase.auth.getUser();
-    const uid = me.user?.id;
-    if (!uid) return;
-    await supabase
-      .from("profiles")
-      .upsert({ user_id: uid }, { onConflict: "user_id" });
-  };
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,13 +44,10 @@ export default function LoginPage() {
     });
     setLoading(false);
 
-    if (error) {
-      setErr(error.message);
-      return;
-    }
+    if (error) return setErr(error.message);
 
-    // ★ 重要：ログイン直後にサーバーCookieへ同期（middlewareが見えるように）
     if (data.session) {
+      // サーバーCookieと同期（middlewareが見えるように）
       await fetch("/auth/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -63,13 +59,8 @@ export default function LoginPage() {
       });
     }
 
-    await ensureProfile();
-
-    // SSRへ即反映
+    await ensureProfile(supabase);
     router.refresh();
-
-    // next パラメータがあれば最優先で戻す
-    const next = search?.get("next");
     router.replace(next || "/posts");
   };
 
