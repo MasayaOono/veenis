@@ -1,4 +1,4 @@
-// app/posts/page.tsx などルートに合わせて
+// app/posts/page.tsx
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -17,6 +17,7 @@ import {
   Divider,
   Button,
   Autocomplete,
+  Pagination,
 } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
 import ClearIcon from "@mui/icons-material/Clear";
@@ -33,10 +34,9 @@ type FeedPost = {
   author_display_name: string | null;
   author_avatar_url: string | null;
 };
-
 type TagAgg = { name: string; cnt: number };
 
-const LIMIT = 40;
+const LIMIT = 24;
 const PRESET_CATEGORIES = [
   "カット",
   "カラー",
@@ -49,7 +49,6 @@ const PRESET_CATEGORIES = [
   "エステ",
 ];
 
-/* ---------- helpers ---------- */
 function parseTagsParam(p: string | null): string[] {
   if (!p) return [];
   return p
@@ -74,98 +73,171 @@ export default function PostsIndexPage() {
   const pathname = usePathname();
   const params = useSearchParams();
 
-  // URL → 派生値
-  const qParam = (params.get("q") || "").trim();
+  // URL -> 条件
+  const qParamRaw = (params.get("q") || "").trim();
   const sortParam = (params.get("sort") === "popular" ? "popular" : "new") as
     | "new"
     | "popular";
   const tagsParam = parseTagsParam(params.get("tags"));
+  const pageParam = Math.max(1, Number(params.get("page") || 1));
 
-  // UI state（入力）
-  const [query, setQuery] = useState(qParam);
+  // UI state
+  const [query, setQuery] = useState(qParamRaw);
   const [selectedTags, setSelectedTags] = useState<string[]>(tagsParam);
 
-  // 表示データ
+  // データ表示
   const [items, setItems] = useState<FeedPost[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [page, setPage] = useState(pageParam);
+  const [totalPages, setTotalPages] = useState(1);
 
-  // 候補（オートコンプリート用）
+  // 候補
   const [myTags, setMyTags] = useState<string[] | null>(null);
   const [popularTags, setPopularTags] = useState<TagAgg[] | null>(null);
 
-  /* ---------- 1) URL→state 同期（差分がある時だけ） ---------- */
+  // 空打ち防止
+  const canSearch = qParamRaw.length >= 2 || selectedTags.length > 0;
+
+  /* URL→state 同期 */
   useEffect(() => {
-    if (query !== qParam) setQuery(qParam);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qParam]);
+    if (query !== qParamRaw) setQuery(qParamRaw);
+  }, [qParamRaw]); // eslint-disable-line
   useEffect(() => {
     if (!arraysEqual(selectedTags, tagsParam)) setSelectedTags(tagsParam);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.get("tags")]); // ← 直接 tagsParam を依存にすると毎回新配列なので get("tags") を見る
+  }, [params.get("tags")]); // eslint-disable-line
+  useEffect(() => {
+    if (page !== pageParam) setPage(pageParam);
+  }, [pageParam]); // eslint-disable-line
 
-  /* ---------- 2) 安定した pushSearch（同一なら push しない） ---------- */
+  /* URL更新（pageも管理） */
   const pushSearch = useCallback(
-    (q: string, sort: "new" | "popular", tags: string[]) => {
+    (q: string, sort: "new" | "popular", tags: string[], pageNo: number) => {
       const usp = new URLSearchParams();
       if (q) usp.set("q", q);
-      if (sort !== "new") usp.set("sort", sort); // 既定値は省略
+      if (sort !== "new") usp.set("sort", sort);
       const tagParam = toTagsParam(tags);
       if (tagParam) usp.set("tags", tagParam);
+      if (pageNo > 1) usp.set("page", String(pageNo));
 
-      const next = `${pathname}?${usp.toString()}`;
+      const next = `${pathname}${usp.toString() ? `?${usp.toString()}` : ""}`;
       const current = `${pathname}${
         params.toString() ? `?${params.toString()}` : ""
       }`;
-
-      if (next === current) return; // 完全一致ならナビゲーションしない
-      router.push(next);
+      if (next !== current) router.push(next);
     },
     [pathname, params, router]
   );
 
-  /* ---------- データ読み込み（フィード） ---------- */
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
+  /* データ取得（ページネーション対応） */
+  const fetchData = useCallback(async () => {
+    if (!canSearch) {
+      setItems([]);
+      setTotalPages(1);
       setErr(null);
-      const hasTags = selectedTags.length > 0;
-      const rpcName = hasTags ? "list_posts_with_tags" : "list_posts";
-      const payload: any = {
-        p_q: qParam || null,
-        p_sort: sortParam,
-        p_limit: LIMIT,
-        p_offset: 0,
-      };
-      if (hasTags) payload.p_tags = selectedTags;
-
-      const { data, error } = await supabase.rpc(rpcName, payload);
-      if (cancelled) return;
-      if (error) {
-        setErr(error.message);
-        setItems([]);
-      } else {
-        const rows = (data ?? []).map((r: any) => ({
-          id: r.id,
-          title: r.title,
-          slug: r.slug,
-          cover_image_url: r.cover_image_url ?? null,
-          like_count: r.like_count ?? 0,
-          author_username: r.author_username ?? null,
-          author_display_name: r.author_display_name ?? null,
-          author_avatar_url: r.author_avatar_url ?? null,
-        }));
-        setItems(rows);
-      }
       setLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [qParam, sortParam, selectedTags]);
+      return;
+    }
+    setLoading(true);
+    setErr(null);
 
-  /* ---------- タグ候補（あなたのタグ一覧 / 人気タグ） ---------- */
+    const offset = (page - 1) * LIMIT;
+    const hasTags = selectedTags.length > 0;
+    const listRpc = hasTags ? "list_posts_with_tags" : "list_posts";
+    const countRpc = hasTags ? "count_posts_with_tags" : "count_posts";
+
+    const payload: any = {
+      p_q: qParamRaw || null,
+      p_sort: sortParam,
+      p_limit: LIMIT,
+      p_offset: offset,
+    };
+    if (hasTags) payload.p_tags = selectedTags;
+
+    try {
+      const [listRes, countRes] = await Promise.all([
+        supabase.rpc(listRpc, payload),
+        hasTags
+          ? supabase.rpc(countRpc, {
+              p_q: qParamRaw || null,
+              p_tags: selectedTags,
+            })
+          : supabase.rpc(countRpc, { p_q: qParamRaw || null }),
+      ]);
+
+      if (listRes.error) throw listRes.error;
+      if (countRes.error) throw countRes.error;
+
+      const rows = (listRes.data ?? []).map((r: any) => ({
+        id: r.id,
+        title: r.title,
+        slug: r.slug,
+        cover_image_url: r.cover_image_url ?? null,
+        like_count: r.like_count ?? 0,
+        author_username: r.author_username ?? null,
+        author_display_name: r.author_display_name ?? null,
+        author_avatar_url: r.author_avatar_url ?? null,
+      })) as FeedPost[];
+
+      const total = Number(countRes.data ?? 0);
+      const pages = Math.max(1, Math.ceil(total / LIMIT));
+      // ページがはみ出したら1ページ目へ（URL更新で再取得される）
+      if (page > pages) {
+        setLoading(false);
+        pushSearch(qParamRaw, sortParam, selectedTags, 1);
+        return;
+      }
+
+      setItems(rows);
+      setTotalPages(pages);
+    } catch (e: any) {
+      setErr(e?.message ?? "読み込みに失敗しました");
+      setItems([]);
+      setTotalPages(1);
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    canSearch,
+    page,
+    selectedTags,
+    qParamRaw,
+    sortParam,
+    supabase,
+    pushSearch,
+  ]);
+
+  // 条件 or page 変化で取得
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  /* ハンドラ */
+  const handleSearch = () => {
+    if (!(query.trim().length >= 2 || selectedTags.length > 0)) return;
+    // 新検索は1ページ目へ
+    pushSearch(query.trim(), sortParam, selectedTags, 1);
+  };
+  const clearSearch = () => {
+    if (!query) return;
+    setQuery("");
+    pushSearch("", sortParam, selectedTags, 1);
+  };
+  const handleSort = (_: any, v: "new" | "popular" | null) => {
+    if (!v || v === sortParam) return;
+    pushSearch(qParamRaw, v, selectedTags, 1);
+  };
+  const handleTagsChange = (_: any, values: string[]) => {
+    if (arraysEqual(values, selectedTags)) return;
+    setSelectedTags(values);
+    pushSearch(qParamRaw, sortParam, values, 1);
+  };
+  const handlePageChange = (_: any, nextPage: number) => {
+    if (nextPage === page) return;
+    pushSearch(qParamRaw, sortParam, selectedTags, nextPage);
+  };
+
+  /* 候補（そのまま） */
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -179,29 +251,17 @@ export default function PostsIndexPage() {
           }
           return;
         }
-        // あなたの所有タグ
-        const { data: tagsData, error: tErr } = await supabase
+        const { data: tagsData } = await supabase
           .from("tags")
           .select("name")
           .eq("owner_id", uid);
-        if (tErr) throw tErr;
         if (!cancelled)
           setMyTags((tagsData ?? []).map((t: any) => t.name as string));
-
-        // あなたの公開記事で多いタグ
-        const { data: ptData, error: pErr } = await supabase
+        const { data: ptData } = await supabase
           .from("post_tags")
-          .select(
-            `
-            tag_id,
-            tags!inner(name, owner_id),
-            posts!inner(id, author_id, is_published)
-          `
-          )
+          .select(`tags!inner(name), posts!inner(id, author_id, is_published)`)
           .eq("posts.author_id", uid)
           .eq("posts.is_published", true);
-        if (pErr) throw pErr;
-
         const counts = new Map<string, number>();
         (ptData ?? []).forEach((row: any) => {
           const name = row.tags?.name as string | undefined;
@@ -223,27 +283,8 @@ export default function PostsIndexPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [supabase]);
 
-  /* ---------- ハンドラ類（すべてガード付き） ---------- */
-  const handleSearch = () => pushSearch(query.trim(), sortParam, selectedTags);
-  const clearSearch = () => {
-    if (!query) return;
-    setQuery("");
-    pushSearch("", sortParam, selectedTags);
-  };
-  const handleSort = (_: any, v: "new" | "popular" | null) => {
-    if (!v || v === sortParam) return;
-    pushSearch(qParam, v, selectedTags);
-  };
-  const handleTagsChange = (_: any, values: string[]) => {
-    // 同一内容ならURL更新しない
-    if (arraysEqual(values, selectedTags)) return;
-    setSelectedTags(values);
-    pushSearch(qParam, sortParam, values);
-  };
-
-  /* ---------- オートコンプリート候補 ---------- */
   const tagOptions: string[] = useMemo(() => {
     const base = new Set<string>([...PRESET_CATEGORIES]);
     (myTags ?? []).forEach((t) => base.add(t));
@@ -259,7 +300,7 @@ export default function PostsIndexPage() {
         alignItems={{ md: "center" }}
       >
         <TextField
-          placeholder="キーワードやタグ名で検索…"
+          placeholder="キーワード（2文字以上） or タグで検索…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleSearch()}
@@ -285,6 +326,9 @@ export default function PostsIndexPage() {
                   onClick={handleSearch}
                   sx={{ ml: 1 }}
                   variant="contained"
+                  disabled={
+                    !(query.trim().length >= 2 || selectedTags.length > 0)
+                  }
                 >
                   検索
                 </Button>
@@ -308,7 +352,7 @@ export default function PostsIndexPage() {
         </ToggleButtonGroup>
       </Stack>
 
-      {/* タグ選択（複数 / freeSolo / オートコンプリート） */}
+      {/* タグ選択 */}
       <Stack spacing={1.5} sx={{ mt: 2 }}>
         <Typography variant="subtitle2" color="text.secondary">
           タグで絞り込む
@@ -319,8 +363,8 @@ export default function PostsIndexPage() {
           options={tagOptions}
           value={selectedTags}
           onChange={handleTagsChange}
-          renderTags={(value: readonly string[], getTagProps) =>
-            value.map((option: string, index: number) => (
+          renderTags={(value, getTagProps) =>
+            value.map((option, index) => (
               <Chip
                 {...getTagProps({ index })}
                 key={`${option}-${index}`}
@@ -328,13 +372,11 @@ export default function PostsIndexPage() {
               />
             ))
           }
-          renderInput={(params) => (
-            <TextField {...params} placeholder="タグを入力 or 選択（複数可）" />
+          renderInput={(p) => (
+            <TextField {...p} placeholder="タグを入力 or 選択（複数可）" />
           )}
           fullWidth
         />
-
-        {/* 人気タグのショートカット */}
         {popularTags && popularTags.length > 0 && (
           <Stack direction="row" spacing={1} flexWrap="wrap">
             {popularTags.map((t) => {
@@ -345,7 +387,9 @@ export default function PostsIndexPage() {
                   key={t.name}
                   label={`${t.name} (${t.cnt})`}
                   variant="outlined"
-                  onClick={() => !disabled && handleTagsChange(null, next)}
+                  onClick={() =>
+                    !disabled && handleTagsChange(null as any, next)
+                  }
                   disabled={disabled}
                   sx={{ mb: 1 }}
                 />
@@ -357,8 +401,12 @@ export default function PostsIndexPage() {
 
       <Divider sx={{ my: 3 }} />
 
-      {/* 結果一覧 */}
-      {loading ? (
+      {/* 結果 */}
+      {!canSearch ? (
+        <Typography color="text.secondary">
+          検索キーワード（2文字以上）またはタグを指定してください。
+        </Typography>
+      ) : loading && items.length === 0 ? (
         <Box sx={{ display: "grid", placeItems: "center", py: 6 }}>
           <CircularProgress />
         </Box>
@@ -369,33 +417,48 @@ export default function PostsIndexPage() {
           該当する記事はありません。
         </Typography>
       ) : (
-        <Box
-          sx={{
-            display: "grid",
-            gap: 2,
-            gridTemplateColumns: {
-              xs: "1fr",
-              sm: "repeat(2, 1fr)",
-              md: "repeat(3, 1fr)",
-              lg: "repeat(4, 1fr)",
-            },
-          }}
-        >
-          {items.map((p) => (
-            <PostCard
-              key={p.id}
-              title={p.title}
-              id={p.id}
-              cover_image_url={p.cover_image_url}
-              likeCount={p.like_count ?? 0}
-              author={{
-                username: p.author_username,
-                display_name: p.author_display_name,
-                avatar_url: p.author_avatar_url,
-              }}
+        <>
+          <Box
+            sx={{
+              display: "grid",
+              gap: 2,
+              gridTemplateColumns: {
+                xs: "1fr",
+                sm: "repeat(2, 1fr)",
+                md: "repeat(3, 1fr)",
+                lg: "repeat(4, 1fr)",
+              },
+            }}
+          >
+            {items.map((p) => (
+              <PostCard
+                key={p.id}
+                title={p.title}
+                id={p.id}
+                cover_image_url={p.cover_image_url}
+                likeCount={p.like_count ?? 0}
+                author={{
+                  username: p.author_username,
+                  display_name: p.author_display_name,
+                  avatar_url: p.author_avatar_url,
+                }}
+              />
+            ))}
+          </Box>
+
+          {/* ページネーション */}
+          <Box sx={{ display: "grid", placeItems: "center", py: 3 }}>
+            <Pagination
+              page={page}
+              count={totalPages}
+              onChange={handlePageChange}
+              color="primary"
+              shape="rounded"
+              siblingCount={0}
+              boundaryCount={1}
             />
-          ))}
-        </Box>
+          </Box>
+        </>
       )}
     </Box>
   );

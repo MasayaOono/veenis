@@ -31,7 +31,12 @@ export default function PostCard({
     avatar_url?: string | null;
   };
 }) {
-  const image = cover_image_url || getPlaceholderCoverDataUrl(title);
+  const image =
+    cover_image_url ||
+    getPlaceholderCoverDataUrl(
+      title,
+      author?.display_name || author?.username || undefined
+    );
   const userHref = author?.username ? `/users/${author.username}` : undefined;
 
   return (

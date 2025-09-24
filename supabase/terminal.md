@@ -11,4 +11,6 @@ supabase db dump \
   --role-only \
   -f supabase/roles.sql 
 
-supabase functions secrets set \ SUPABASE_URL="https://zylkbsmbxctfdwatifxi.supabase.co" \ SUPABASE_SERVICE_ROLE_KEY="<サービスロールキー>" \ RESEND_API_KEY="<ResendのAPIキー>" \ WEBHOOK_SECRET="<任意の長い秘密文字列>" \ SITE_URL="https://veenis.vercel.app"
+
+# resendのAPIキー
+re_Dkwt42Tf_KJps6RvieX4XzmyhDmMAHVsE

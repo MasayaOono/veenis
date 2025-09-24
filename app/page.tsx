@@ -1,6 +1,7 @@
 // app/posts/page.tsx
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import NextLink from "next/link";
 import {
@@ -22,10 +23,11 @@ import {
 } from "@mui/material";
 import PostCard from "@/app/_components/PostCard";
 import { createClient } from "@/lib/supabase";
+
 type FeedPost = {
   id: string;
   title: string;
-  slug: string;
+  slug: string | null;
   cover_image_url: string | null;
   like_count: number;
   author_username: string | null;
@@ -35,12 +37,25 @@ type FeedPost = {
 
 const LIMIT = 40;
 
-/* ---------------- いつも出す（見た目リッチな）イントロ ---------------- */
+/* ---------------- イントロ（毎回） ---------------- */
 function AppIntro() {
   const theme = useTheme();
-  const [open, setOpen] = useState(true); // ← 毎回表示
+  const [open, setOpen] = useState(false);
 
-  // ガラス感・透明感（ライト/ダーク両対応）
+  // 初回訪問のみ表示（localStorage フラグ）
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const seen = localStorage.getItem("veenis_intro_seen");
+    if (!seen) setOpen(true);
+  }, []);
+
+  const closeAndRemember = useCallback(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("veenis_intro_seen", "1");
+    }
+    setOpen(false);
+  }, []);
+
   const paperStyles = {
     px: { xs: 2, sm: 3 },
     py: { xs: 2, sm: 2.5 },
@@ -56,7 +71,6 @@ function AppIntro() {
       theme.palette.mode === "dark"
         ? "0 10px 30px rgba(0,0,0,0.45)"
         : "0 10px 30px rgba(0,0,0,0.15)",
-    // うっすらグラデ
     backgroundImage:
       theme.palette.mode === "dark"
         ? "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0))"
@@ -66,23 +80,15 @@ function AppIntro() {
   return (
     <Dialog
       open={open}
-      onClose={() => setOpen(false)}
+      onClose={closeAndRemember}
       fullWidth
       maxWidth="sm"
       aria-labelledby="veenis-intro-title"
       transitionDuration={{ enter: 250, exit: 200 }}
       PaperProps={{ sx: paperStyles }}
     >
-      {/* トップのロゴ/バッジ */}
-      <Box
-        sx={{
-          display: "flex",
-          alignItems: "center",
-          gap: 1,
-          mt: { xs: 0.5, sm: 1 },
-          mb: 0.5,
-        }}
-      >
+      {/* ロゴ */}
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: { xs: 0.5, sm: 1 }, mb: 0.5 }}>
         <Box
           sx={{
             width: 28,
@@ -92,139 +98,98 @@ function AppIntro() {
             boxShadow: "0 4px 16px rgba(6,182,212,0.35)",
           }}
         />
-        <Typography
-          variant="overline"
-          sx={{ letterSpacing: 1.2, opacity: 0.9 }}
-        >
+        <Typography variant="overline" sx={{ letterSpacing: 1.2, opacity: 0.9 }}>
           VEENIS
         </Typography>
       </Box>
 
-      <DialogTitle
-        id="veenis-intro-title"
-        sx={{
-          fontWeight: 800,
-          lineHeight: 1.2,
-          px: 0,
-          pt: 0,
-          pb: 0.5,
-        }}
-      >
-        現場知見を、美しく整える。
+      <DialogTitle id="veenis-intro-title" sx={{ fontWeight: 800, lineHeight: 1.2, px: 0, pt: 0, pb: 0.5 }}>
+        現場知見を、みんなの力で磨こう。
       </DialogTitle>
 
       <DialogContent dividers sx={{ px: 0, border: "none" }}>
         <Typography sx={{ mb: 2, opacity: 0.9 }}>
-          Veenisは、美容のプロが「施術設計・運用ノウハウ」を
-          <b>書く／集める／共有する</b>ためのワークスペースです。
+          Veenis は、美容の<b>学生さん・アシスタント・若手〜ベテラン</b>まで、<br/>
+          「施術設計・運用ノウハウ」を
+          <b>書く／集める／共有する</b>ための<br/>ワークスペースです。
         </Typography>
 
         <Stack spacing={1.25} sx={{ mb: 2 }}>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Chip
-              size="small"
-              label="書く"
-              sx={{
-                bgcolor: "transparent",
-                border: "1px solid",
-                borderColor: "primary.main",
-              }}
-            />
-            <Typography variant="body2" sx={{ opacity: 0.9 }}>
-              ブリーチ設計・矯正プロトコル・カウンセリング雛形をテンプレから素早く作成
-            </Typography>
-          </Stack>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Chip
-              size="small"
-              label="集める"
-              sx={{
-                bgcolor: "transparent",
-                border: "1px solid",
-                borderColor: "primary.main",
-              }}
-            />
-            <Typography variant="body2" sx={{ opacity: 0.9 }}>
-              タグや公開範囲で整理し、自分の“辞書”として再利用
-            </Typography>
-          </Stack>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Chip
-              size="small"
-              label="共有"
-              sx={{
-                bgcolor: "transparent",
-                border: "1px solid",
-                borderColor: "primary.main",
-              }}
-            />
-            <Typography variant="body2" sx={{ opacity: 0.9 }}>
-              公開／リンク限定／グループ限定を選べます
-            </Typography>
-          </Stack>
+          <FeatureChip label="書く" text="テンプレから素早く書き出し。短くてもOK、まず一歩。" />
+          <FeatureChip label="集める" text="タグで整理。自分だけの“辞書”として後から使える。" />
+          <FeatureChip label="共有" text="完全公開 or グループ限定を選べます。" />
         </Stack>
 
-        {/* うっすらガイドカード */}
+        {/* スタートガイド（やってみたくなる導線） */}
         <Box
           sx={{
             p: 1.5,
             borderRadius: 3,
             border: `1px dashed ${theme.palette.divider}`,
-            bgcolor:
-              theme.palette.mode === "dark"
-                ? "rgba(255,255,255,0.04)"
-                : "rgba(0,0,0,0.03)",
+            bgcolor: theme.palette.mode === "dark" ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
           }}
         >
           <Typography variant="body2" sx={{ mb: 1, fontWeight: 600 }}>
-            はじめの一歩
+            まずは 5 分だけ、やってみましょう！
           </Typography>
           <Stack spacing={0.75}>
             <Typography variant="body2" sx={{ opacity: 0.9 }}>
-              1) 右上「記事作成」からテンプレを選び、要点だけ埋める
+              1) ログインして「記事作成」 → 気になるテンプレを1つ選ぶ
             </Typography>
             <Typography variant="body2" sx={{ opacity: 0.9 }}>
-              2) タグと公開範囲を設定して保存（リンク限定が便利）
+              2) 今日の学び／施術の気づきを3行だけメモ
             </Typography>
             <Typography variant="body2" sx={{ opacity: 0.9 }}>
-              3) 画像は保存時に自動アップロード
+              3) 公開範囲（公開 or グループ）を選んで保存
             </Typography>
           </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+            ※ 記事の作成にはログインが必要です。
+          </Typography>
         </Box>
       </DialogContent>
 
-      <DialogActions sx={{ px: 0, pt: 2 }}>
-        <Button
-          component={NextLink}
-          href="/about"
-          color="inherit"
-          sx={{ opacity: 0.9 }}
-          onClick={() => setOpen(false)}
-        >
-          詳しい使い方
+      <DialogActions sx={{ px: 0, pt: 2, gap: 1 }}>
+        <Button component={NextLink} href="/about" color="inherit" sx={{ opacity: 0.9 }} onClick={closeAndRemember}>
+          記事を見てみる
         </Button>
         <Button
-          onClick={() => setOpen(false)}
+          component={NextLink}
+          href="/auth/login?next=/posts/new"
+          onClick={closeAndRemember}
           variant="contained"
-          sx={{
-            background: "linear-gradient(135deg, #7C3AED 0%, #06B6D4 100%)",
-          }}
+          sx={{ background: "linear-gradient(135deg, #7C3AED 0%, #06B6D4 100%)" }}
         >
-          はじめる
+          ログインしてはじめる
         </Button>
       </DialogActions>
     </Dialog>
   );
 }
-/* ----------------------------------------------------------- */
 
+/** 小さな表示部品：左がチップ、右が説明 */
+function FeatureChip({ label, text }: { label: string; text: string }) {
+  return (
+    <Stack direction="row" spacing={1} alignItems="center">
+      <Chip
+        size="small"
+        label={label}
+        sx={{ bgcolor: "transparent", border: "1px solid", borderColor: "primary.main" }}
+      />
+      <Typography variant="body2" sx={{ opacity: 0.9 }}>
+        {text}
+      </Typography>
+    </Stack>
+  );
+}
+
+/* ---------------- 一覧（新着 / 人気） ---------------- */
 export default function PostsIndexPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
 
-  // URL → ソートのみ採用
   const sortParam = (params.get("sort") === "popular" ? "popular" : "new") as
     | "new"
     | "popular";
@@ -237,7 +202,8 @@ export default function PostsIndexPage() {
     (sort: "new" | "popular") => {
       const usp = new URLSearchParams();
       if (sort !== "new") usp.set("sort", sort);
-      const next = `${pathname}?${usp.toString()}`;
+      const q = usp.toString();
+      const next = `${pathname}${q ? `?${q}` : ""}`; // ← 余分な ? を出さない
       const current = `${pathname}${
         params.toString() ? `?${params.toString()}` : ""
       }`;
@@ -253,20 +219,21 @@ export default function PostsIndexPage() {
       setLoading(true);
       setErr(null);
       const { data, error } = await supabase.rpc("list_posts", {
-        p_q: null,
-        p_sort: sortParam,
+        p_q: null, // 検索なし
+        p_sort: sortParam, // 'new' | 'popular'
         p_limit: LIMIT,
         p_offset: 0,
       });
       if (cancelled) return;
+
       if (error) {
         setErr(error.message);
         setItems([]);
       } else {
-        const rows = (data ?? []).map((r: any) => ({
+        const rows: FeedPost[] = (data ?? []).map((r: any) => ({
           id: r.id,
           title: r.title,
-          slug: r.slug,
+          slug: r.slug ?? null,
           cover_image_url: r.cover_image_url ?? null,
           like_count: r.like_count ?? 0,
           author_username: r.author_username ?? null,
@@ -280,7 +247,7 @@ export default function PostsIndexPage() {
     return () => {
       cancelled = true;
     };
-  }, [sortParam]);
+  }, [sortParam, supabase]);
 
   const handleSort = (_: any, v: "new" | "popular" | null) => {
     if (!v || v === sortParam) return;
@@ -289,10 +256,10 @@ export default function PostsIndexPage() {
 
   return (
     <Box sx={{ mx: "auto", px: 2, py: 3 }}>
-      {/* おしゃれ透明イントロ（毎回表示） */}
+      {/* イントロ（毎回） */}
       <AppIntro />
 
-      {/* ソートのみ */}
+      {/* ソート切替 */}
       <Stack
         direction={{ xs: "column", md: "row" }}
         spacing={2}
@@ -342,9 +309,10 @@ export default function PostsIndexPage() {
           {items.map((p) => (
             <PostCard
               key={p.id}
+              id={p.id}
               title={p.title}
               cover_image_url={p.cover_image_url}
-              likeCount={p.like_count ?? 0}
+              likeCount={p.like_count}
               author={{
                 username: p.author_username,
                 display_name: p.author_display_name,

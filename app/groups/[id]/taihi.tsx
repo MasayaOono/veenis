@@ -449,7 +449,6 @@ export default function GroupDetailPage() {
           </Stack>
 
           {/* 招待（リンク＋メール） */}
-             {isAdmin && (
           <Card variant="outlined" sx={{ mb: 3 }}>
             <CardContent>
               {section("招待", <LinkIcon fontSize="small" />)}
@@ -490,8 +489,57 @@ export default function GroupDetailPage() {
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
                 共有URLは <code>/g/&lt;token&gt;</code> です。踏むだけで参加できます（要ログイン）。
               </Typography>
+
+              {/* 2) メールで招待（管理者のみ） */}
+              {isAdmin && (
+                <>
+                  <Divider sx={{ my: 2 }} />
+                  {section("メールで招待", <EmailIcon fontSize="small" />)}
+                  <Stack spacing={1}>
+                    <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
+                      <TextField
+                        placeholder="email1@example.com, email2@example.com …"
+                        value={emailInput}
+                        onChange={(e) => setEmailInput(e.target.value)}
+                        onKeyDown={handleEmailKeyDown}
+                        fullWidth
+                        helperText="Enter / カンマ / スペース で追加。無効な形式は自動スキップします。"
+                      />
+                      <Button onClick={handleEmailAddClick} startIcon={<AddIcon />}>
+                        追加
+                      </Button>
+                      <Button
+                        variant="contained"
+                        startIcon={<SendIcon />}
+                        onClick={sendInvites}
+                        disabled={emails.length === 0 || sending}
+                      >
+                        {sending ? "送信中…" : "招待メール送信"}
+                      </Button>
+                    </Stack>
+
+                    {/* 追加済みメール */}
+                    <Stack direction="row" spacing={1} flexWrap="wrap">
+                      {emails.map((em) => (
+                        <Chip
+                          key={em}
+                          label={em}
+                          onDelete={() => removeEmail(em)}
+                          deleteIcon={<CloseIcon />}
+                          sx={{ mb: 1 }}
+                        />
+                      ))}
+                      {emails.length === 0 && (
+                        <Typography variant="body2" color="text.secondary">
+                          追加したメールがここに表示されます
+                        </Typography>
+                      )}
+                    </Stack>
+                  </Stack>
+                </>
+              )}
             </CardContent>
-          </Card>)}
+          </Card>
 
           {/* メンバー一覧 */}
           <Card variant="outlined" sx={{ mb: 3 }}>
