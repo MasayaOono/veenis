@@ -43,7 +43,9 @@ function AppIntro() {
   const [open, setOpen] = useState(false);
 
 
+
   
+
   // 初回訪問のみ表示（localStorage フラグ）
   useEffect(() => {
     if (typeof window === "undefined") return;
