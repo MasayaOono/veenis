@@ -1,115 +1,150 @@
-// app/posts/[slug]/opengraph-image.tsx
+// app/posts/[id]/opengraph-image.tsx
 import { ImageResponse } from "next/og";
-import { createClient } from "@supabase/supabase-js";
+import React from "react";
 
-export const runtime = "edge";
+export const runtime = "edge";                 // 早い
+export const contentType = "image/png";        // 画像MIME
 export const size = { width: 1200, height: 630 };
-export const contentType = "image/png";
 
-type Props = {
-  params: Promise<{ slug: string }>;
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
-};
+// タイトル長でフォントサイズ調整
+function titleFontSize(len: number) {
+  if (len <= 10) return 72;
+  if (len <= 16) return 64;
+  if (len <= 22) return 56;
+  if (len <= 30) return 48;
+  if (len <= 42) return 40;
+  return 34;
+}
+const decodeQP = (v: string | string[] | undefined) =>
+  Array.isArray(v) ? decodeURIComponent(v[0] ?? "") :
+  v ? decodeURIComponent(v) : "";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+export default async function Image({
+  // Nextが注入する props（型は緩めでOK）
+  params,
+  searchParams,
+}: {
+  params: { id: string };
+  searchParams?: Record<string, string | string[] | undefined>;
+}) {
+  const title = decodeQP(searchParams?.title) || "記事";
+  const author = decodeQP(searchParams?.author) || "";
 
-export default async function Image(props: Props) {
-  const { slug } = await props.params;
-  const sp = (props.searchParams ? await props.searchParams : {}) || {};
-  const tokenRaw = sp["token"];
-  const token =
-    typeof tokenRaw === "string"
-      ? tokenRaw
-      : Array.isArray(tokenRaw)
-      ? tokenRaw[0]
-      : undefined;
+  const W = size.width;
+  const H = size.height;
+  const pad = 48;
+  const radius = 36;
+  const brand = {
+    border: "#CC66E8",
+    panel: "#FFFFFF",
+    title: "#555555",
+    sub: "#666666",
+    underline: "#45D0CF",
+  };
+  const tSize = titleFontSize([...title].length);
+  const underlineW = Math.max(280, Math.min(560, Math.round(W * 0.46)));
 
-  // 記事取得（タイトル/カバーだけ使う）
-  let post: any = null;
-  if (token) {
-    const { data } = await supabase.rpc("get_post_by_token", {
-      p_slug: slug,
-      p_token: token,
-    });
-    post = data;
-  } else {
-    const { data } = await supabase
-      .from("posts")
-      .select("title, cover_image_url, visibility")
-      .eq("slug", slug)
-      .maybeSingle();
-    post = data;
-  }
-
-  const title = (post?.title as string) || "記事";
-  const cover = (post?.cover_image_url as string) || "";
-
-  // 背景：カバーがあれば全画面に敷く（無ければシンプルなグラデ）
   return new ImageResponse(
-    (
+    <div
+      style={{
+        width: W,
+        height: H,
+        display: "flex",
+        background: brand.border,
+        borderRadius: radius,
+        padding: pad,
+      }}
+    >
       <div
         style={{
-          width: "100%",
-          height: "100%",
+          flex: 1,
+          background: brand.panel,
+          borderRadius: radius,
+          boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
           display: "flex",
-          position: "relative",
-          fontFamily: "ui-sans-serif, system-ui, -apple-system, Arial",
+          flexDirection: "column",
+          padding: 56,
+          fontFamily:
+            "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Helvetica Neue', Arial",
         }}
       >
-        {/* bg */}
-        {cover ? (
-          <img
-            src={cover}
-            alt=""
-            style={{
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              filter: "brightness(0.65)",
-            }}
-          />
-        ) : (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              background:
-                "linear-gradient(135deg, #111827 0%, #1f2937 50%, #374151 100%)",
-            }}
-          />
-        )}
-
-        {/* title */}
+        {/* タイトル */}
         <div
           style={{
-            position: "absolute",
-            inset: 0,
-            padding: "72px",
+            margin: "0 auto",
+            maxWidth: 920,
+            textAlign: "center",
+            fontSize: tSize,
+            fontWeight: 800,
+            lineHeight: 1.2,
+            color: brand.title,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}
+        >
+          {title}
+        </div>
+
+        {/* アンダーライン */}
+        <div
+          style={{
+            width: underlineW,
+            height: 6,
+            borderRadius: 3,
+            background: brand.underline,
+            margin: "22px auto 0",
+          }}
+        />
+
+        {/* 著者 */}
+        {author ? (
+          <div
+            style={{
+              marginTop: 36,
+              textAlign: "center",
+              fontSize: 32,
+              fontWeight: 700,
+              color: brand.sub,
+            }}
+          >
+            {author}
+          </div>
+        ) : null}
+
+        {/* 右下ロゴ */}
+        <div
+          style={{
+            marginTop: "auto",
             display: "flex",
-            alignItems: "flex-end",
-            color: "#fff",
+            alignItems: "center",
+            gap: 12,
+            justifyContent: "center",
+            opacity: 0.9,
           }}
         >
           <div
             style={{
-              fontSize: 64,
-              fontWeight: 800,
-              lineHeight: 1.1,
-              textShadow:
-                "0 2px 6px rgba(0,0,0,.35), 0 10px 40px rgba(0,0,0,.35)",
-              maxWidth: 1000,
+              width: 22,
+              height: 22,
+              borderRadius: 6,
+              background:
+                "linear-gradient(135deg, #8B5CF6 0%, #06B6D4 100%)",
+              boxShadow: "0 4px 12px rgba(6,182,212,0.35)",
+            }}
+          />
+          <div
+            style={{
+              fontSize: 18,
+              letterSpacing: 1.2,
+              fontWeight: 600,
+              color: "#666",
             }}
           >
-            {title}
+            VEENIS
           </div>
         </div>
       </div>
-    ),
+    </div>,
     size
   );
 }
