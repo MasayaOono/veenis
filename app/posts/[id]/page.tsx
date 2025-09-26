@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { headers, cookies } from "next/headers";
 import ClientPostPage from "./ClientPostPage";
 import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
+
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -34,10 +35,10 @@ export async function generateMetadata({
   const proto = h.get("x-forwarded-proto") || "https";
   const site = `${proto}://${host}`;
 
-  // ★ CookieStore を取得して関数で渡す（Next15対応）
+  // ★ CookieStore を渡す（Next15対応）
   const supabase = createServerComponentClient({ cookies });
 
-  // 記事取得
+  // 記事取得（トークン経由 or 通常公開）
   let post: any = null;
   if (token) {
     const { data } = await supabase.rpc("get_post_by_token_by_id", {
@@ -54,6 +55,7 @@ export async function generateMetadata({
     post = data;
   }
 
+  // 404/非公開など
   if (!post) {
     const canonical = `${site}/posts/${encodeURIComponent(id)}${
       token ? `?token=${encodeURIComponent(token)}` : ""
@@ -66,6 +68,7 @@ export async function generateMetadata({
     };
   }
 
+  // 本文から簡易ディスクリプション抽出
   const strip = (md: string) =>
     (md || "")
       .replace(/```[\s\S]*?```/g, "")
@@ -83,10 +86,12 @@ export async function generateMetadata({
     token ? `?token=${encodeURIComponent(token)}` : ""
   }`;
 
-  const fallbackOg = `${site}/posts/${encodeURIComponent(
-    post.id
-  )}/opengraph-image${token ? `?token=${encodeURIComponent(token)}` : ""}`;
-  const images = [post.cover_image_url || fallbackOg];
+  // ✅ カバー未設定時は共通のプレースホルダーAPIにフォールバック（OG/Twitter対応）
+  const placeholderOg = `${site}/api/placeholder-cover?title=${encodeURIComponent(
+    title
+  )}`;
+
+  const images = [post.cover_image_url || placeholderOg];
 
   const meta: Metadata = {
     title,
