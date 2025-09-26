@@ -33,6 +33,12 @@ function summarize(md: string, max = 120) {
   return s.slice(0, max);
 }
 
+// ★ RPCの戻りを単一行へ正規化（戻りが配列/オブジェクト/null どれでもOKに）
+function one<T>(data: T | T[] | null | undefined): T | null {
+  if (!data) return null;
+  return Array.isArray(data) ? (data[0] ?? null) : data;
+}
+
 export async function generateMetadata({
   params,
   searchParams,
@@ -44,39 +50,35 @@ export async function generateMetadata({
 
   const h = await headers();
   const host = h.get("x-forwarded-host") || h.get("host") || "localhost:3000";
-  const proto = h.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
+  const proto =
+    h.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
   const site = `${proto}://${host}`;
 
   const sp = searchParams ? await searchParams : undefined;
   const tokenRaw = sp?.token;
   const token =
-    typeof tokenRaw === "string"
-      ? tokenRaw
-      : Array.isArray(tokenRaw)
-      ? tokenRaw[0]
-      : undefined;
+    typeof tokenRaw === "string" ? tokenRaw :
+    Array.isArray(tokenRaw) ? tokenRaw[0] : undefined;
 
   const supabase = createServerComponentClient({ cookies });
 
-  // === 重要：RLSを跨ぐため常に SECURITY DEFINER RPC を使用 ===
+  // === SECURITY DEFINER RPC を利用（戻り配列に注意） ===
   let post: any = null;
 
   if (token) {
-    // トークン経由（関数名は環境に合わせて）
     const { data } = await supabase.rpc("get_post_meta_by_token", {
       p_post_id: id,
       p_token: token,
     });
-    post = data;
+    post = one(data);
   } else {
-    // 公開記事用
     const { data } = await supabase.rpc("get_public_post_meta", {
       p_post_id: id,
     });
-    post = data;
+    post = one(data);
   }
 
-  // 取得不可（非公開・期限切れ・RLS対象 等）
+  // 取得不可（非公開・期限切れ 等）
   if (!post) {
     const canonical = `${site}/posts/${encodeURIComponent(id)}${
       token ? `?token=${encodeURIComponent(token)}` : ""
