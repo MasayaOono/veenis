@@ -1,17 +1,12 @@
-// app/posts/[id]/opengraph-image/route.tsx
+// app/posts/[id]/opengraph-image.tsx
 import { ImageResponse } from "next/og";
-
-// なくてもいいけど、型エラー回避で入れておくと安心
 import React from "react";
 
-export const runtime = "edge";
-export const contentType = "image/png";
+export const runtime = "edge";                 // 早い
+export const contentType = "image/png";        // 画像MIME
 export const size = { width: 1200, height: 630 };
 
-function decodeQP(s: string | null) {
-  try { return s ? decodeURIComponent(s) : null; } catch { return s; }
-}
-
+// タイトル長でフォントサイズ調整
 function titleFontSize(len: number) {
   if (len <= 10) return 72;
   if (len <= 16) return 64;
@@ -20,12 +15,25 @@ function titleFontSize(len: number) {
   if (len <= 42) return 40;
   return 34;
 }
+const decodeQP = (v: string | string[] | undefined) =>
+  Array.isArray(v) ? decodeURIComponent(v[0] ?? "") :
+  v ? decodeURIComponent(v) : "";
 
-export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const title = decodeQP(searchParams.get("title")) || "記事";
-  const author = decodeQP(searchParams.get("author")) || "";
+export default async function Image({
+  // Nextが注入する props（型は緩めでOK）
+  params,
+  searchParams,
+}: {
+  params: { id: string };
+  searchParams?: Record<string, string | string[] | undefined>;
+}) {
+  const title = decodeQP(searchParams?.title) || "記事";
+  const author = decodeQP(searchParams?.author) || "";
 
+  const W = size.width;
+  const H = size.height;
+  const pad = 48;
+  const radius = 36;
   const brand = {
     border: "#CC66E8",
     panel: "#FFFFFF",
@@ -33,11 +41,6 @@ export async function GET(req: Request) {
     sub: "#666666",
     underline: "#45D0CF",
   };
-
-  const W = size.width;
-  const H = size.height;
-  const pad = 48;
-  const radius = 36;
   const tSize = titleFontSize([...title].length);
   const underlineW = Math.max(280, Math.min(560, Math.round(W * 0.46)));
 
@@ -65,6 +68,7 @@ export async function GET(req: Request) {
             "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Helvetica Neue', Arial",
         }}
       >
+        {/* タイトル */}
         <div
           style={{
             margin: "0 auto",
@@ -81,6 +85,7 @@ export async function GET(req: Request) {
           {title}
         </div>
 
+        {/* アンダーライン */}
         <div
           style={{
             width: underlineW,
@@ -91,6 +96,7 @@ export async function GET(req: Request) {
           }}
         />
 
+        {/* 著者 */}
         {author ? (
           <div
             style={{
@@ -105,6 +111,7 @@ export async function GET(req: Request) {
           </div>
         ) : null}
 
+        {/* 右下ロゴ */}
         <div
           style={{
             marginTop: "auto",
@@ -138,6 +145,6 @@ export async function GET(req: Request) {
         </div>
       </div>
     </div>,
-    { ...size }
+    size
   );
 }
