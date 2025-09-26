@@ -1,115 +1,112 @@
-// app/posts/[slug]/opengraph-image.tsx
+// app/posts/[id]/opengraph-image/route.ts
 import { ImageResponse } from "next/og";
-import { createClient } from "@supabase/supabase-js";
 
-export const runtime = "edge";
+export const runtime = "edge"; // 速い＆PNG生成
+export const alt = "Post cover";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-type Props = {
-  params: Promise<{ slug: string }>;
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
-};
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
-export default async function Image(props: Props) {
-  const { slug } = await props.params;
-  const sp = (props.searchParams ? await props.searchParams : {}) || {};
-  const tokenRaw = sp["token"];
-  const token =
-    typeof tokenRaw === "string"
-      ? tokenRaw
-      : Array.isArray(tokenRaw)
-      ? tokenRaw[0]
-      : undefined;
-
-  // 記事取得（タイトル/カバーだけ使う）
-  let post: any = null;
-  if (token) {
-    const { data } = await supabase.rpc("get_post_by_token", {
-      p_slug: slug,
-      p_token: token,
-    });
-    post = data;
-  } else {
-    const { data } = await supabase
-      .from("posts")
-      .select("title, cover_image_url, visibility")
-      .eq("slug", slug)
-      .maybeSingle();
-    post = data;
+function decode(s: string | null): string | null {
+  try {
+    return s ? decodeURIComponent(s) : null;
+  } catch {
+    return s;
   }
+}
 
-  const title = (post?.title as string) || "記事";
-  const cover = (post?.cover_image_url as string) || "";
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const title = decode(searchParams.get("title")) || "記事";
+  const author = decode(searchParams.get("author")) || "";
 
-  // 背景：カバーがあれば全画面に敷く（無ければシンプルなグラデ）
+  // シンプルで読みやすいレイアウト（SVG的に描画）
+  // ここでは Web フォントは使わず、system-ui で安定表示
   return new ImageResponse(
     (
       <div
         style={{
-          width: "100%",
-          height: "100%",
+          width: "1200px",
+          height: "630px",
           display: "flex",
-          position: "relative",
-          fontFamily: "ui-sans-serif, system-ui, -apple-system, Arial",
+          background: "#CC66E8",
+          padding: 40,
         }}
       >
-        {/* bg */}
-        {cover ? (
-          <img
-            src={cover}
-            alt=""
-            style={{
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              filter: "brightness(0.65)",
-            }}
-          />
-        ) : (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              background:
-                "linear-gradient(135deg, #111827 0%, #1f2937 50%, #374151 100%)",
-            }}
-          />
-        )}
-
-        {/* title */}
         <div
           style={{
-            position: "absolute",
-            inset: 0,
-            padding: "72px",
+            flex: 1,
+            borderRadius: 28,
+            background: "white",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
             display: "flex",
-            alignItems: "flex-end",
-            color: "#fff",
+            flexDirection: "column",
+            padding: 56,
+            fontFamily:
+              "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Helvetica Neue', Arial",
           }}
         >
           <div
             style={{
-              fontSize: 64,
+              fontSize: 56,
               fontWeight: 800,
-              lineHeight: 1.1,
-              textShadow:
-                "0 2px 6px rgba(0,0,0,.35), 0 10px 40px rgba(0,0,0,.35)",
-              maxWidth: 1000,
+              lineHeight: 1.2,
+              color: "#444",
+              display: "block",
+              overflow: "hidden",
+              displayWebkitBox: "block",
             }}
           >
             {title}
           </div>
+
+          <div
+            style={{
+              marginTop: 24,
+              width: 520,
+              height: 6,
+              background: "#45D0CF",
+              borderRadius: 3,
+            }}
+          />
+
+          {author ? (
+            <div
+              style={{
+                marginTop: 36,
+                fontSize: 32,
+                fontWeight: 700,
+                color: "#666",
+              }}
+            >
+              {author}
+            </div>
+          ) : null}
+
+          <div style={{ marginTop: "auto", display: "flex", alignItems: "center", gap: 10, opacity: 0.9 }}>
+            <div
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: 6,
+                background:
+                  "linear-gradient(135deg, #8B5CF6 0%, #06B6D4 100%)",
+                boxShadow: "0 4px 12px rgba(6,182,212,0.35)",
+              }}
+            />
+            <div
+              style={{
+                fontSize: 18,
+                letterSpacing: 1.2,
+                fontWeight: 600,
+                color: "#666",
+              }}
+            >
+              VEENIS
+            </div>
+          </div>
         </div>
       </div>
     ),
-    size
+    { ...size }
   );
 }
