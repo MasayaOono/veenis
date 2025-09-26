@@ -151,18 +151,12 @@ export async function generateMetadata({
   const desc  = summarize(post.body_md ?? "") || "記事のプレビュー";
   const canonical = `${site}/posts/${encodeURIComponent(post.id ?? id)}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
 
-  const authorName =
-    (post.author_display_name ?? post.author_username ?? "").toString().trim();
+  const authorName = post.author_display_name || post.author_username || "";
 
-  // 画像URL（カバーが無い／相対URL → 文字入りOGの自動生成URLへ）
-  const coverAbs = abs(site, post.cover_image_url);
-  const ogFallback =
-    `${site}/posts/${encodeURIComponent(post.id ?? id)}/opengraph-image` +
-    `?title=${encodeURIComponent(title)}` +
-    (authorName ? `&author=${encodeURIComponent(authorName)}` : "") +
-    (token ? `&token=${encodeURIComponent(token)}` : "");
-  // カバー優先にするなら↓のまま。常に文字入りなら `const ogImage = ogFallback;`
-  const ogImage = coverAbs || ogFallback;
+  const ogImage =
+  `${site}/api/og` +
+  `?title=${encodeURIComponent(title)}` +
+  (authorName ? `&author=${encodeURIComponent(authorName)}` : "");
 
   return {
     title,
