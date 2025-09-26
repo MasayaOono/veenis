@@ -19,6 +19,7 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const title = (searchParams.get("title") || "タイトル未設定").trim();
   const author = (searchParams.get("author") || "").trim();
+  console.log(title,author)
 
   const pad = 48;
   const radius = 36;
