@@ -6,8 +6,9 @@ import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-export const runtime = "nodejs"; // ← Service Role を使うので Node 固定
+export const runtime = "nodejs"; // Service Role を使う可能性があるため node 固定
 
+// Next.js 15: params / searchParams は Promise
 type Params = Promise<{ id: string }>;
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -18,8 +19,6 @@ function abs(site: string, url?: string | null) {
     return `${site}${url.startsWith("/") ? "" : "/"}${url}`;
   }
 }
-
-
 function summarize(md: string, max = 120) {
   const s = (md || "")
     .replace(/```[\s\S]*?```/g, "")
@@ -41,36 +40,27 @@ function getToken(sp?: Record<string, string | string[] | undefined>) {
 }
 
 /* ===== data fetchers（順にフォールバック） ===== */
-async function fetchPostWithServiceRole(
-  id: string,
-  token?: string
-): Promise<any | null> {
+async function fetchPostWithServiceRole(id: string, token?: string) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !service) return null; // SR 未設定ならスキップ
+  if (!url || !service) return null; // SR 未設定なら skip
 
   const admin = createClient(url, service, { auth: { persistSession: false } });
 
-  // 1) 推奨の RPC 名
   if (token) {
     const r1 = await admin.rpc("get_post_meta_by_token", { p_post_id: id, p_token: token });
     if (!r1.error && r1.data) return one(r1.data);
-    // 2) 旧名 RPC も試す
     const r2 = await admin.rpc("get_post_by_token_by_id", { p_post_id: id, p_token: token });
     if (!r2.error && r2.data) return one(r2.data);
   } else {
     const r = await admin.rpc("get_public_post_meta", { p_post_id: id });
     if (!r.error && r.data) return one(r.data);
-    // 3) RPC が無ければ直 SELECT（public のみ）
     const s = await admin
       .from("posts")
-      .select(
-        `
-          id, title, body_md, cover_image_url, visibility,
-          author_id,
-          author:profiles!posts_author_id_fkey(display_name, username)
-        `
-      )
+      .select(`
+        id, title, body_md, cover_image_url, visibility, author_id,
+        author:profiles!posts_author_id_fkey(display_name, username)
+      `)
       .eq("id", id)
       .eq("visibility", "public")
       .maybeSingle();
@@ -90,20 +80,17 @@ async function fetchPostWithServiceRole(
   return null;
 }
 
-async function fetchPostWithAnon(id: string): Promise<any | null> {
+async function fetchPostWithAnon(id: string) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anon) return null;
   const sb = createClient(url, anon, { auth: { persistSession: false } });
   const s = await sb
     .from("posts")
-    .select(
-      `
-        id, title, body_md, cover_image_url, visibility,
-        author_id,
-        author:profiles!posts_author_id_fkey(display_name, username)
-      `
-    )
+    .select(`
+      id, title, body_md, cover_image_url, visibility, author_id,
+      author:profiles!posts_author_id_fkey(display_name, username)
+    `)
     .eq("id", id)
     .eq("visibility", "public")
     .maybeSingle();
@@ -132,7 +119,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { id } = await params;
 
-  // 絶対URLの決定（Slack/Twitter のクローラーでも正しく計算）
+  // 絶対URLの組み立て（Slack/Twitter のクローラーでもOK）
   const h = await headers();
   const host = h.get("x-forwarded-host") || h.get("host") || "localhost:3000";
   const proto = h.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
@@ -140,15 +127,15 @@ export async function generateMetadata({
 
   const token = getToken(searchParams ? await searchParams : undefined);
 
-  // ① Service Role を最優先（RLSを回避）
+  // 1) Service Role 最優先（RLS回避）
   let post = await fetchPostWithServiceRole(id, token);
 
-  // ② それでも null の場合、公開記事のみ匿名キーで直 SELECT（最終保険）
+  // 2) まだ無ければ公開のみ匿名キー（保険）
   if (!post && !token) {
     post = await fetchPostWithAnon(id);
   }
 
-  // 取得できない（非公開/トークン無効/RPC無し等）
+  // 取得不可（非公開/無効トークン等）
   if (!post) {
     const canonical = `${site}/posts/${encodeURIComponent(id)}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
     return {
@@ -159,34 +146,39 @@ export async function generateMetadata({
     };
   }
 
-  const title: string = post.title || "記事";
-  const desc = summarize(post.body_md ?? "");
+  // タイトル・著者は“必ず”非空になるように（空文字でOGに渡さない）
+  const title = (post.title ?? "").toString().trim() || "タイトル未設定";
+  const desc  = summarize(post.body_md ?? "") || "記事のプレビュー";
   const canonical = `${site}/posts/${encodeURIComponent(post.id ?? id)}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
 
-  const authorName = post.author_display_name || post.author_username || "";
+  const authorName =
+    (post.author_display_name ?? post.author_username ?? "").toString().trim();
+
+  // 画像URL（カバーが無い／相対URL → 文字入りOGの自動生成URLへ）
   const coverAbs = abs(site, post.cover_image_url);
   const ogFallback =
     `${site}/posts/${encodeURIComponent(post.id ?? id)}/opengraph-image` +
     `?title=${encodeURIComponent(title)}` +
     (authorName ? `&author=${encodeURIComponent(authorName)}` : "") +
     (token ? `&token=${encodeURIComponent(token)}` : "");
+  // カバー優先にするなら↓のまま。常に文字入りなら `const ogImage = ogFallback;`
   const ogImage = coverAbs || ogFallback;
 
   return {
     title,
-    description: desc || "記事のプレビュー",
+    description: desc,
     alternates: { canonical },
     openGraph: {
       type: "article",
       url: canonical,
       title,
-      description: desc || "記事のプレビュー",
+      description: desc,
       images: [{ url: ogImage, width: 1200, height: 630 }],
     },
     twitter: {
       card: "summary_large_image",
       title,
-      description: desc || "記事のプレビュー",
+      description: desc,
       images: [ogImage],
     },
     ...(post.visibility !== "public" ? { robots: { index: false, follow: false } } : {}),

@@ -1,12 +1,10 @@
-// app/posts/[id]/opengraph-image.tsx
 import { ImageResponse } from "next/og";
-import React from "react";
 
-export const runtime = "edge";                 // 早い
-export const contentType = "image/png";        // 画像MIME
+export const runtime = "edge";
+export const contentType = "image/png";
 export const size = { width: 1200, height: 630 };
+export const alt = "Veenis Post Preview"; // 追加（任意）
 
-// タイトル長でフォントサイズ調整
 function titleFontSize(len: number) {
   if (len <= 10) return 72;
   if (len <= 16) return 64;
@@ -15,19 +13,18 @@ function titleFontSize(len: number) {
   if (len <= 42) return 40;
   return 34;
 }
+
 const decodeQP = (v: string | string[] | undefined) =>
   Array.isArray(v) ? decodeURIComponent(v[0] ?? "") :
   v ? decodeURIComponent(v) : "";
 
 export default async function Image({
-  // Nextが注入する props（型は緩めでOK）
-  params,
   searchParams,
 }: {
   params: { id: string };
   searchParams?: Record<string, string | string[] | undefined>;
 }) {
-  const title = decodeQP(searchParams?.title) || "記事";
+  const title = decodeQP(searchParams?.title) || "タイトル未設定"; // ← 既定値を“記事”から変更
   const author = decodeQP(searchParams?.author) || "";
 
   const W = size.width;
@@ -45,103 +42,21 @@ export default async function Image({
   const underlineW = Math.max(280, Math.min(560, Math.round(W * 0.46)));
 
   return new ImageResponse(
-    <div
-      style={{
-        width: W,
-        height: H,
-        display: "flex",
-        background: brand.border,
-        borderRadius: radius,
-        padding: pad,
-      }}
-    >
-      <div
-        style={{
-          flex: 1,
-          background: brand.panel,
-          borderRadius: radius,
-          boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
-          display: "flex",
-          flexDirection: "column",
-          padding: 56,
-          fontFamily:
-            "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Helvetica Neue', Arial",
-        }}
-      >
-        {/* タイトル */}
-        <div
-          style={{
-            margin: "0 auto",
-            maxWidth: 920,
-            textAlign: "center",
-            fontSize: tSize,
-            fontWeight: 800,
-            lineHeight: 1.2,
-            color: brand.title,
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-          }}
-        >
+    <div style={{ width: W, height: H, display: "flex", background: brand.border, borderRadius: radius, padding: pad }}>
+      <div style={{ flex: 1, background: brand.panel, borderRadius: radius, boxShadow: "0 10px 30px rgba(0,0,0,0.15)", display: "flex", flexDirection: "column", padding: 56, fontFamily:
+        "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Helvetica Neue', Arial" }}>
+        <div style={{ margin: "0 auto", maxWidth: 920, textAlign: "center", fontSize: tSize, fontWeight: 800, lineHeight: 1.2, color: brand.title, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
           {title}
         </div>
-
-        {/* アンダーライン */}
-        <div
-          style={{
-            width: underlineW,
-            height: 6,
-            borderRadius: 3,
-            background: brand.underline,
-            margin: "22px auto 0",
-          }}
-        />
-
-        {/* 著者 */}
+        <div style={{ width: underlineW, height: 6, borderRadius: 3, background: brand.underline, margin: "22px auto 0" }} />
         {author ? (
-          <div
-            style={{
-              marginTop: 36,
-              textAlign: "center",
-              fontSize: 32,
-              fontWeight: 700,
-              color: brand.sub,
-            }}
-          >
+          <div style={{ marginTop: 36, textAlign: "center", fontSize: 32, fontWeight: 700, color: brand.sub }}>
             {author}
           </div>
         ) : null}
-
-        {/* 右下ロゴ */}
-        <div
-          style={{
-            marginTop: "auto",
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            justifyContent: "center",
-            opacity: 0.9,
-          }}
-        >
-          <div
-            style={{
-              width: 22,
-              height: 22,
-              borderRadius: 6,
-              background:
-                "linear-gradient(135deg, #8B5CF6 0%, #06B6D4 100%)",
-              boxShadow: "0 4px 12px rgba(6,182,212,0.35)",
-            }}
-          />
-          <div
-            style={{
-              fontSize: 18,
-              letterSpacing: 1.2,
-              fontWeight: 600,
-              color: "#666",
-            }}
-          >
-            VEENIS
-          </div>
+        <div style={{ marginTop: "auto", display: "flex", alignItems: "center", gap: 12, justifyContent: "center", opacity: 0.9 }}>
+          <div style={{ width: 22, height: 22, borderRadius: 6, background: "linear-gradient(135deg, #8B5CF6 0%, #06B6D4 100%)", boxShadow: "0 4px 12px rgba(6,182,212,0.35)" }} />
+          <div style={{ fontSize: 18, letterSpacing: 1.2, fontWeight: 600, color: "#666" }}>VEENIS</div>
         </div>
       </div>
     </div>,
