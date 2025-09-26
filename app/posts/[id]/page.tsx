@@ -18,6 +18,8 @@ function abs(site: string, url?: string | null) {
     return `${site}${url.startsWith("/") ? "" : "/"}${url}`;
   }
 }
+
+
 function summarize(md: string, max = 120) {
   const s = (md || "")
     .replace(/```[\s\S]*?```/g, "")
