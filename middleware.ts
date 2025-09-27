@@ -13,7 +13,6 @@ const DEV_PASS = process.env.DEV_BASIC_PASS;
 const PROTECTED = [/^\/groups(\/.*)?$/, /^\/posts\/new$/, /^\/g\/[^/]+$/];
 
 function needBasicGate() {
-  // 環境変数がセットされていれば devゲートを有効化（本番では未設定にする）
   return Boolean(DEV_USER && DEV_PASS);
 }
 
@@ -44,7 +43,7 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  // ===== ② ここから従来のSupabaseベースの保護（特定ページのみ） =====
+  // ===== ② Supabase セッション取得 =====
   const res = NextResponse.next();
   const supabase = createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     cookies: {
@@ -60,15 +59,26 @@ export async function middleware(req: NextRequest) {
   const { data } = await supabase.auth.getUser();
   const user = data.user;
 
-  const path = req.nextUrl.pathname;
+  const url = req.nextUrl;
+  const path = url.pathname;
   const isProtected = PROTECTED.some((re) => re.test(path));
   const isAuthArea = path.startsWith("/auth/");
+  const isAuthCallback = path === "/auth/callback";
+  const hasAuthCode = url.searchParams.has("code");
 
+  // ===== ③ ログイン必須ページ → 未ログインは /auth/login へ =====
   if (isProtected && !user && !isAuthArea) {
     const login = new URL("/auth/login", req.url);
-    const qs = req.nextUrl.search || "";
+    const qs = url.search || "";
     login.searchParams.set("next", `${path}${qs}`); // 戻り先
     return NextResponse.redirect(login);
+  }
+
+  // ===== ④ 既ログイン者が /auth/* を開いたら /posts へ誘導 =====
+  //     ただし /auth/callback は検証のため通す（?code= がある場合も通す）
+  if (user && isAuthArea && !isAuthCallback && !hasAuthCode) {
+    const to = new URL("/posts", req.url);
+    return NextResponse.redirect(to);
   }
 
   return res;

@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import ClientFrame from "./_components/ClientFrame";
 import "./globals.css";
 import AuthListener from "./_components/AuthListner";
+import TopProgress from "./_components/TopProgress";
 const site =
   process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
   "https://veenis.vercel.app";
@@ -24,6 +25,7 @@ export default function RootLayout({
       {/* body をフレックス親にするのは globals.css 側で実施 */}
       <body className="layout-root">
         <Suspense fallback={null}>
+          <TopProgress />
           <AuthListener />
           <Providers>
             <ClientFrame>{children}</ClientFrame>

@@ -904,9 +904,6 @@ export default function NewPostPage() {
           }}
         >
           <Toolbar sx={{ minHeight: 48, gap: 1 }}>
-            <IconButton onClick={() => setSideOpen(true)}>
-              <MenuIcon />
-            </IconButton>
             <Typography variant="subtitle1" sx={{ fontWeight: 700, flex: 1 }}>
               新規投稿
             </Typography>
@@ -1082,7 +1079,7 @@ export default function NewPostPage() {
                 ref={editorRef}
                 valueMd={body}
                 onChangeMd={onEditorChange}
-                placeholder="大見出し、引用、リスト、画像、リンクに対応。画像は保存時に自動アップロードされます。"
+                placeholder="本文を入力"
               />
             </Box>
           </Box>

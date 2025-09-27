@@ -1,6 +1,5 @@
 app
  _components
-  AuthDialog.tsx
   AuthListner.tsx
   ClientFrame.tsx
   ContentColumn.tsx

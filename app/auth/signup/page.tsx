@@ -41,14 +41,18 @@ export default function SignupPage() {
     if (password !== confirm) return setErr("パスワードが一致しません。");
     setLoading(true);
 
-    const redirect =
-      typeof window !== "undefined"
-        ? `${window.location.origin}/posts`
-        : undefined;
+  const redirect =
+  typeof window !== "undefined"
+    ? `${window.location.origin}/me/edit`
+    : undefined;
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: redirect },
+      options: {
+        // 認証メールのリンク（verify?redirect_to=...）に埋め込まれる
+        emailRedirectTo: redirect,
+      },
     });
 
     setLoading(false);

@@ -73,10 +73,12 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(function Inner(
   const [focused, setFocused] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // 初期HTML（Markdown→HTML）
   const initialHTML = useMemo(
     () => (valueMd ? (marked.parse(valueMd) as string) : ""),
     [valueMd]
   );
+
   const requestPositionUpdate = () => {
     if (!editor || !wrapperRef.current) return;
     const { view, state } = editor;
@@ -92,6 +94,7 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(function Inner(
     y = Math.max(minY, Math.min(maxY, y));
     setToolbarY(y);
   };
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ heading: false }),
@@ -102,6 +105,9 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(function Inner(
         placeholder:
           placeholder ??
           "ここに本文を書いてください（見出し・引用・リスト・画像・リンク対応）",
+        emptyEditorClass: "is-editor-empty",
+        showOnlyCurrent: false,
+        includeChildren: true,
       }),
     ],
     editorProps: {
@@ -143,6 +149,7 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(function Inner(
     immediatelyRender: false,
   });
 
+  // 外部 valueMd 変更を TipTap に同期
   useEffect(() => {
     if (!editor) return;
     const currentMd = turndown.turndown(editor.getHTML());
@@ -156,6 +163,7 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(function Inner(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [valueMd]);
 
+  // スクロール/リサイズ時も位置更新
   useEffect(() => {
     let raf = 0;
     const onScroll = () => {
@@ -286,12 +294,11 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(function Inner(
       sx={{
         position: "relative",
         px: { xs: 0, sm: 1 },
-        // 下部固定ツールバーと安全域ぶんの余白
-        pb: { xs: "calc(64px + env(safe-area-inset-bottom))", md: 0 },
+        // ← 以前の“下部固定ツールバー”は廃止したので余白不要
       }}
       onLoad={requestPositionUpdate}
     >
-      {/* PC：左のフローティングツール */}
+      {/* PC：左のフローティングツール（従来どおり） */}
       {!isMdDown && (
         <Box
           ref={toolRef}
@@ -304,205 +311,61 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(function Inner(
             transition: "opacity .12s linear",
           }}
         >
-          <Paper
-            elevation={0}
-            sx={{
-              width: TOOLBAR_W,
-              p: 0.5,
-              borderRadius: 2,
-              bgcolor: "rgba(255,255,255,0.72)",
-              backdropFilter: "saturate(1.1) blur(6px)",
-              border: "1px solid",
-              borderColor: "divider",
-            }}
-          >
-            <Stack spacing={0.25} alignItems="center">
-              <Tooltip title="見出し H1" placement="right">
-                <IconButton
-                  size="small"
-                  onClick={() => toggleHeading(1)}
-                  color={
-                    isActive("heading", { level: 1 }) ? "primary" : "default"
-                  }
-                >
-                  <TitleIcon />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="見出し H2" placement="right">
-                <IconButton
-                  size="small"
-                  onClick={() => toggleHeading(2)}
-                  color={
-                    isActive("heading", { level: 2 }) ? "primary" : "default"
-                  }
-                >
-                  <TitleIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="見出し H3" placement="right">
-                <IconButton
-                  size="small"
-                  onClick={() => toggleHeading(3)}
-                  color={
-                    isActive("heading", { level: 3 }) ? "primary" : "default"
-                  }
-                >
-                  <TitleIcon sx={{ fontSize: 18 }} />
-                </IconButton>
-              </Tooltip>
-
-              <Divider flexItem sx={{ my: 0.5 }} />
-
-              <Tooltip title="引用" placement="right">
-                <IconButton
-                  size="small"
-                  onClick={toggleBlockquote}
-                  color={isActive("blockquote") ? "primary" : "default"}
-                >
-                  <FormatQuoteIcon />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="リンク" placement="right">
-                <IconButton size="small" onClick={setLink}>
-                  <LinkIcon />
-                </IconButton>
-              </Tooltip>
-
-              <Divider flexItem sx={{ my: 0.5 }} />
-
-              <Tooltip title="箇条書き" placement="right">
-                <IconButton
-                  size="small"
-                  onClick={toggleBulletList}
-                  color={isActive("bulletList") ? "primary" : "default"}
-                >
-                  <FormatListBulletedIcon />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="番号リスト" placement="right">
-                <IconButton
-                  size="small"
-                  onClick={toggleOrderedList}
-                  color={isActive("orderedList") ? "primary" : "default"}
-                >
-                  <FormatListNumberedIcon />
-                </IconButton>
-              </Tooltip>
-
-              <Divider flexItem sx={{ my: 0.5 }} />
-
-              <Tooltip title="画像（URL）" placement="right">
-                <IconButton size="small" onClick={insertImageByUrl}>
-                  <ImageIcon />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="画像アップロード" placement="right">
-                <span>
-                  <IconButton
-                    size="small"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploading}
-                  >
-                    {uploading ? <CircularProgress size={18} /> : <ImageIcon />}
-                  </IconButton>
-                </span>
-              </Tooltip>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                hidden
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) addFile(f);
-                  e.currentTarget.value = "";
-                }}
-              />
-            </Stack>
-          </Paper>
+          <EditorToolPanel
+            uploading={uploading}
+            isActive={isActive}
+            toggleHeading={toggleHeading}
+            toggleBlockquote={toggleBlockquote}
+            toggleBulletList={toggleBulletList}
+            toggleOrderedList={toggleOrderedList}
+            setLink={setLink}
+            addFileByPicker={() => fileInputRef.current?.click()}
+          />
         </Box>
       )}
 
-      {/* md以下：画面下部固定ツールバー */}
+      {/* モバイル/タブレット：右側のフローティング縦ツール（キャレット追従） */}
       {isMdDown && (
-        <Paper
-          elevation={3}
+        <Box
+          ref={toolRef}
           sx={{
-            position: "fixed",
-            left: 0,
-            right: 0,
-            bottom: 0,
-            zIndex: 1200,
-            borderTopLeftRadius: 12,
-            borderTopRightRadius: 12,
-            p: 0.5,
-            bgcolor: "background.paper",
-            // 安全域ぶんのパディング
-            pb: "calc(8px + env(safe-area-inset-bottom))",
+            position: "absolute",
+            right: 6, // 画面内に収める
+            top: `${Math.max(0, toolbarY)}px`,
+            zIndex: 5,
+            pointerEvents: showTools ? "auto" : "none",
+            opacity: showTools ? 1 : 0,
+            transition: "opacity .12s linear",
           }}
         >
-          <Stack
-            direction="row"
-            spacing={0.25}
-            alignItems="center"
-            justifyContent="space-between"
-            sx={{ px: 1 }}
-          >
-            <Stack direction="row" spacing={0.25} alignItems="center">
-              <IconButton
-                size="small"
-                onClick={() => toggleHeading(2)}
-                aria-label="見出し"
-              >
-                <TitleIcon fontSize="small" />
-              </IconButton>
-              <IconButton
-                size="small"
-                onClick={toggleBlockquote}
-                aria-label="引用"
-              >
-                <FormatQuoteIcon />
-              </IconButton>
-              <IconButton
-                size="small"
-                onClick={toggleBulletList}
-                aria-label="箇条書き"
-              >
-                <FormatListBulletedIcon />
-              </IconButton>
-              <IconButton
-                size="small"
-                onClick={toggleOrderedList}
-                aria-label="番号リスト"
-              >
-                <FormatListNumberedIcon />
-              </IconButton>
-              <IconButton size="small" onClick={setLink} aria-label="リンク">
-                <LinkIcon />
-              </IconButton>
-              <IconButton
-                size="small"
-                onClick={insertImageByUrl}
-                aria-label="画像URL"
-              >
-                <ImageIcon />
-              </IconButton>
-              <span>
-                <IconButton
-                  size="small"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading}
-                  aria-label="画像アップロード"
-                >
-                  {uploading ? <CircularProgress size={18} /> : <ImageIcon />}
-                </IconButton>
-              </span>
-            </Stack>
-          </Stack>
-        </Paper>
+          <EditorToolPanel
+            uploading={uploading}
+            isActive={isActive}
+            toggleHeading={toggleHeading}
+            toggleBlockquote={toggleBlockquote}
+            toggleBulletList={toggleBulletList}
+            toggleOrderedList={toggleOrderedList}
+            setLink={setLink}
+            addFileByPicker={() => fileInputRef.current?.click()}
+            dense // ← モバイルはやや大きめタップ領域に
+          />
+        </Box>
       )}
 
-      {/* 本体 */}
+      {/* 隠しファイル入力（共通） */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(e) => {
+          const f = e.currentTarget.files?.[0];
+          if (f) addFile(f);
+          e.currentTarget.value = "";
+        }}
+      />
+
+      {/* 本体（Placeholderの見た目CSSをここに付与） */}
       <Box
         onFocusCapture={() => {
           setFocused(true);
@@ -515,8 +378,6 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(function Inner(
         }}
         sx={{
           mt: 0.5,
-          border: "none",
-          boxShadow: "none",
           "& .ProseMirror": {
             outline: "none",
             border: "none",
@@ -526,6 +387,17 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(function Inner(
             minHeight: 240,
           },
           "& .ProseMirror img": { maxWidth: "100%", height: "auto" },
+
+          // ★ TipTap Placeholder 表示：is-editor-empty に ::before で描画
+          "& .ProseMirror p.is-editor-empty:first-of-type::before": {
+            content: 'attr(data-placeholder)',
+            color: "text.secondary",
+            float: "left",
+            height: 0,
+            pointerEvents: "none",
+            whiteSpace: "nowrap",
+            opacity: 0.6,
+          },
         }}
       >
         <EditorContent editor={editor} />
@@ -535,3 +407,120 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(function Inner(
 });
 
 export default RichEditor;
+
+/* ===== ツールパネル（PC/モバイル共用、見た目だけ差分） ===== */
+function EditorToolPanel({
+  uploading,
+  isActive,
+  toggleHeading,
+  toggleBlockquote,
+  toggleBulletList,
+  toggleOrderedList,
+  setLink,
+  addFileByPicker,
+  dense = false,
+}: {
+  uploading: boolean;
+  isActive: (name: string, attrs?: any) => boolean;
+  toggleHeading: (l: 1 | 2 | 3) => void;
+  toggleBlockquote: () => void;
+  toggleBulletList: () => void;
+  toggleOrderedList: () => void;
+  setLink: () => void;
+  addFileByPicker: () => void;
+  dense?: boolean;
+}) {
+  return (
+    <Paper
+      elevation={0}
+      sx={{
+        width: TOOLBAR_W + (dense ? 6 : 0),
+        p: 0.5,
+        borderRadius: 2,
+        bgcolor: "rgba(255,255,255,0.92)",
+        backdropFilter: "saturate(1.05) blur(8px)",
+        border: "1px solid",
+        borderColor: "divider",
+      }}
+    >
+      <Stack spacing={0.25} alignItems="center">
+        <Tooltip title="見出し H1" placement="right">
+          <IconButton
+            size="small"
+            onClick={() => toggleHeading(1)}
+            color={isActive("heading", { level: 1 }) ? "primary" : "default"}
+          >
+            <TitleIcon />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="見出し H2" placement="right">
+          <IconButton
+            size="small"
+            onClick={() => toggleHeading(2)}
+            color={isActive("heading", { level: 2 }) ? "primary" : "default"}
+          >
+            <TitleIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="見出し H3" placement="right">
+          <IconButton
+            size="small"
+            onClick={() => toggleHeading(3)}
+            color={isActive("heading", { level: 3 }) ? "primary" : "default"}
+          >
+            <TitleIcon sx={{ fontSize: 18 }} />
+          </IconButton>
+        </Tooltip>
+
+        <Divider flexItem sx={{ my: 0.5 }} />
+
+        <Tooltip title="引用" placement="right">
+          <IconButton
+            size="small"
+            onClick={toggleBlockquote}
+            color={isActive("blockquote") ? "primary" : "default"}
+          >
+            <FormatQuoteIcon />
+          </IconButton>
+        </Tooltip>
+
+        <Tooltip title="リンク" placement="right">
+          <IconButton size="small" onClick={setLink}>
+            <LinkIcon />
+          </IconButton>
+        </Tooltip>
+
+        <Divider flexItem sx={{ my: 0.5 }} />
+
+        <Tooltip title="箇条書き" placement="right">
+          <IconButton
+            size="small"
+            onClick={toggleBulletList}
+            color={isActive("bulletList") ? "primary" : "default"}
+          >
+            <FormatListBulletedIcon />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="番号リスト" placement="right">
+          <IconButton
+            size="small"
+            onClick={toggleOrderedList}
+            color={isActive("orderedList") ? "primary" : "default"}
+          >
+            <FormatListNumberedIcon />
+          </IconButton>
+        </Tooltip>
+
+        <Divider flexItem sx={{ my: 0.5 }} />
+
+        <Tooltip title="画像アップロード" placement="right">
+          <span>
+            <IconButton size="small" onClick={addFileByPicker} disabled={uploading}>
+              {uploading ? <CircularProgress size={18} /> : <ImageIcon />}
+            </IconButton>
+          </span>
+        </Tooltip>
+      </Stack>
+    </Paper>
+  );
+}
