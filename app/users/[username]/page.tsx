@@ -8,14 +8,18 @@ import {
   Avatar,
   Box,
   Chip,
-  Divider,
-  Link,
   Paper,
   Stack,
   Typography,
   Alert,
   Button,
+  useMediaQuery,
+  List,
+  ListItem,
+  ListItemText,
+  Divider,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import NextLink from "next/link";
 import PostCard from "@/app/_components/PostCard";
 
@@ -36,13 +40,11 @@ type PostRow = {
   author_id: string;
 };
 
-// groups は単一オブジェクト or null を想定
 type GroupRow = {
   groups: { id: string; name: string; owner_id: string } | null;
   role: "owner" | "admin" | "member";
 };
 
-// API からの生データ（配列で返る場合に備えるための緩い型）
 type RawGroupRow = {
   role: string;
   groups?:
@@ -53,8 +55,10 @@ type RawGroupRow = {
 
 export default function UserProfilePage() {
   const supabase = useMemo(() => createClient(), []);
-
   const { username } = useParams<{ username: string }>();
+  const theme = useTheme();
+  const isSmDown = useMediaQuery(theme.breakpoints.down("sm"));
+  const isMdDown = useMediaQuery(theme.breakpoints.down("md"));
 
   const [meId, setMeId] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -62,6 +66,11 @@ export default function UserProfilePage() {
   const [totalLikes, setTotalLikes] = useState<number>(0);
   const [draftCount, setDraftCount] = useState<number>(0);
   const [groups, setGroups] = useState<GroupRow[]>([]);
+  const [followingCount, setFollowingCount] = useState<number>(0);
+  const [followersCount, setFollowersCount] = useState<number>(0);
+  const [topLiked, setTopLiked] = useState<{ id: string; title: string; likes: number }[]>([]);
+  const [latestPublishedAt, setLatestPublishedAt] = useState<string | null>(null);
+
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
@@ -71,11 +80,10 @@ export default function UserProfilePage() {
       setLoading(true);
       setErr(null);
 
-      // ログインユーザー
       const { data: me } = await supabase.auth.getUser();
       setMeId(me.user?.id ?? null);
 
-      // プロフィール取得
+      // プロフィール
       const profRes = await supabase
         .from("profiles")
         .select("user_id, username, display_name, avatar_url, created_at")
@@ -90,7 +98,7 @@ export default function UserProfilePage() {
       const prof = profRes.data as Profile;
       setProfile(prof);
 
-      // 公開/グループ記事
+      // 記事（公開/グループ）
       const postRes = await supabase
         .from("posts")
         .select("id, title, slug, cover_image_url, published_at, author_id")
@@ -103,7 +111,10 @@ export default function UserProfilePage() {
         const list = postRes.data as PostRow[];
         setPosts(list);
 
-        // いいね総数
+        // 最新公開日
+        setLatestPublishedAt(list[0]?.published_at ?? null);
+
+        // いいね総数 & 人気の投稿（上位3）
         if (list.length > 0) {
           const ids = list.map((p) => p.id);
           const likesRes = await supabase
@@ -116,11 +127,15 @@ export default function UserProfilePage() {
             for (const row of likesRes.data as { post_id: string }[]) {
               counts.set(row.post_id, (counts.get(row.post_id) ?? 0) + 1);
             }
-            const total = Array.from(counts.values()).reduce(
-              (a, b) => a + b,
-              0
-            );
+            const total = Array.from(counts.values()).reduce((a, b) => a + b, 0);
             setTotalLikes(total);
+
+            // トップ3
+            const ranked = [...list]
+              .map((p) => ({ id: p.id, title: p.title, likes: counts.get(p.id) ?? 0 }))
+              .sort((a, b) => b.likes - a.likes)
+              .slice(0, 3);
+            setTopLiked(ranked);
           }
         }
       }
@@ -135,44 +150,58 @@ export default function UserProfilePage() {
         if (!drafts.error) setDraftCount(drafts.count ?? 0);
       }
 
-      // 所属グループ（配列で返る場合を正規化）
+      // 所属グループ
       const gmRes = await supabase
         .from("group_members")
         .select("role, groups ( id, name, owner_id )")
         .eq("user_id", prof.user_id);
-
       if (!gmRes.error && gmRes.data) {
-        const normalized: GroupRow[] = (gmRes.data as RawGroupRow[]).map(
-          (r) => {
-            const g = Array.isArray(r.groups)
-              ? r.groups[0] ?? null
-              : r.groups ?? null;
-            const role =
-              r.role === "owner" || r.role === "admin" || r.role === "member"
-                ? r.role
-                : "member";
-            return { role, groups: g };
-          }
-        );
+        const normalized: GroupRow[] = (gmRes.data as RawGroupRow[]).map((r) => {
+          const g = Array.isArray(r.groups) ? r.groups[0] ?? null : r.groups ?? null;
+          const role =
+            r.role === "owner" || r.role === "admin" || r.role === "member"
+              ? r.role
+              : "member";
+          return { role, groups: g };
+        });
         setGroups(normalized);
       }
 
+      // フォロー中/フォロワー件数
+      const fwing = await supabase
+        .from("follows")
+        .select("*", { count: "exact", head: true })
+        .eq("follower_id", prof.user_id);
+      setFollowingCount(fwing.count ?? 0);
+
+      const fwers = await supabase
+        .from("follows")
+        .select("*", { count: "exact", head: true })
+        .eq("followee_id", prof.user_id);
+      setFollowersCount(fwers.count ?? 0);
+
       setLoading(false);
     })();
-  }, [username]);
+  }, [username, supabase]);
 
-  const isMe = useMemo(
-    () => !!(meId && profile && meId === profile.user_id),
-    [meId, profile]
-  );
+  const isMe = useMemo(() => !!(meId && profile && meId === profile.user_id), [meId, profile]);
 
-  if (loading) return <Typography sx={{ p: 3 }}>読み込み中…</Typography>;
-  if (err || !profile)
+  if (loading) {
     return (
-      <Alert severity="warning" sx={{ m: 2 }}>
-        {err ?? "表示できません"}
-      </Alert>
+      <Box sx={{ maxWidth: 1200, mx: "auto", px: 2, py: 4 }}>
+        <Paper variant="outlined" sx={{ p: 3 }}>
+          <Typography variant="body2" color="text.secondary">読み込み中…</Typography>
+        </Paper>
+      </Box>
     );
+  }
+  if (err || !profile) {
+    return (
+      <Box sx={{ maxWidth: 800, mx: "auto", px: 2, py: 4 }}>
+        <Alert severity="warning">{err ?? "表示できません"}</Alert>
+      </Box>
+    );
+  }
 
   const displayName = profile.display_name || profile.username || "Unknown";
   const joined = new Date(profile.created_at).toLocaleDateString("ja-JP", {
@@ -182,97 +211,183 @@ export default function UserProfilePage() {
   });
 
   return (
-    <Box sx={{ maxWidth: 1200, mx: "auto", px: 2, py: 3 }}>
-      {/* ヘッダー */}
-      <Paper variant="outlined" sx={{ p: 2.5, mb: 3 }}>
-        <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
-          <Avatar
-            src={profile.avatar_url ?? undefined}
-            alt={displayName}
-            sx={{ width: 72, height: 72 }}
-          />
-          <Box sx={{ flex: 1, minWidth: 200 }}>
-            <Typography variant="h5" sx={{ fontWeight: 700 }}>
-              {displayName}
-            </Typography>
-            <Stack
-              direction="row"
-              spacing={1}
-              alignItems="center"
-              sx={{ mt: 0.5, color: "text.secondary" }}
-            >
-              <Typography variant="body2">@{profile.username}</Typography>
-              <span>・</span>
-              <Typography variant="body2">登録日 {joined}</Typography>
-            </Stack>
+    <Box
+      sx={{
+        maxWidth: 1280,
+        mx: "auto",
+        px: { xs: 1.5, sm: 2 },
+        py: { xs: 2, sm: 3 },
+        // 2カラム（md+）：左サイド固定幅 + 右メイン、sm以下は1カラム
+        display: "grid",
+        gridTemplateColumns: { xs: "1fr", md: "360px 1fr" },
+        gap: { xs: 2, md: 3 },
+      }}
+    >
+      {/* ===== Left: User Card (sticky) ===== */}
+      <Box
+        sx={{
+          position: { md: "sticky" },
+          top: { md: 88 },
+          alignSelf: "start",
+        }}
+      >
+        {/* Hero-like Card */}
+        <Paper
+          variant="outlined"
+          sx={{
+            p: 2,
+            borderRadius: 3,
+            overflow: "hidden",
+            borderColor: "divider",
+          }}
+        >
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Avatar
+              src={profile.avatar_url ?? undefined}
+              alt={displayName}
+              sx={{
+                width: 72,
+                height: 72,
+                border: "3px solid rgba(255,255,255,0.9)",
+                boxShadow: "0 8px 30px rgba(0,0,0,0.15)",
+                bgcolor: "background.paper",
+              }}
+            />
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="h6" sx={{ fontWeight: 800 }} noWrap title={displayName}>
+                {displayName}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" noWrap>
+                @{profile.username}
+              </Typography>
+            </Box>
+            <Box sx={{ flex: 1 }} />
+            {isMe && (
+              <Button component={NextLink} href="/me" size="small" variant="outlined">
+                編集
+              </Button>
+            )}
+          </Stack>
 
-            <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-              <Chip label={`記事 ${posts.length} 件`} size="small" />
-              <Chip label={`総いいね ${totalLikes}`} size="small" />
-              {isMe && (
-                <Chip
-                  label={`下書き ${draftCount} 件`}
-                  size="small"
-                  color="default"
-                />
-              )}
-            </Stack>
-          </Box>
-
-          {isMe && (
+          {/* Stats row */}
+          <Stack
+            direction="row"
+            spacing={1}
+            sx={{ mt: 1.5, flexWrap: "wrap" }}
+            useFlexGap
+          >
             <Button
               component={NextLink}
-              href="/me"
-              variant="outlined"
+              href={`/users/${encodeURIComponent(profile.username || "")}/following`}
               size="small"
+              variant="outlined"
             >
-              プロフィール編集へ
+              フォロー中&nbsp;<b>{followingCount}</b>
             </Button>
-          )}
-        </Stack>
+            <Button
+              component={NextLink}
+              href={`/users/${encodeURIComponent(profile.username || "")}/followers`}
+              size="small"
+              variant="outlined"
+            >
+              フォロワー&nbsp;<b>{followersCount}</b>
+            </Button>
+          </Stack>
+                <Stack
+            direction="row"
+            spacing={1}
+            sx={{ mt: 1.5, flexWrap: "wrap" }}
+            useFlexGap
+          >
+            <Chip label={`記事 ${posts.length}`} size="small" />
+            <Chip label={`総いいね ${totalLikes}`} size="small" />
+            {isMe && <Chip label={`下書き ${draftCount}`} size="small" />}
 
-        {/* 所属グループ */}
-        <Box sx={{ mt: 2 }}>
-          <Typography variant="subtitle2" gutterBottom>
-            所属グループ（あなたに表示できる範囲）
-          </Typography>
-          {groups.length === 0 ? (
+          </Stack>
+
+          <Divider sx={{ my: 2 }} />
+
+          {/* Meta small */}
+          <Stack spacing={0.5}>
             <Typography variant="body2" color="text.secondary">
-              表示できるグループはありません。
+              登録日&nbsp;{joined}
             </Typography>
-          ) : (
-            <Stack direction="row" spacing={1} flexWrap="wrap">
-              {groups.map((g, idx) => (
-                <Chip
-                  key={idx}
-                  component={g.groups ? NextLink : "div"}
-                  href={g.groups ? `/groups/${g.groups.id}` : undefined}
-                  clickable={!!g.groups}
-                  label={
-                    g.groups
-                      ? `${g.groups.name}（${g.role}）`
-                      : `権限なし（${g.role}）`
-                  }
-                  size="small"
-                  variant="outlined"
-                />
-              ))}
-            </Stack>
-          )}
-        </Box>
-      </Paper>
+          </Stack>
 
-      {/* 記事一覧 */}
+          {/* Groups */}
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
+              所属グループ
+            </Typography>
+            {groups.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                表示できるグループはありません。
+              </Typography>
+            ) : (
+              <Stack direction="row" spacing={1} flexWrap="wrap">
+                {groups.slice(0, 6).map((g, idx) => (
+                  <Chip
+                    key={idx}
+                    component={g.groups ? NextLink : "div"}
+                    href={g.groups ? `/groups/${g.groups.id}` : undefined}
+                    clickable={!!g.groups}
+                    label={g.groups ? `${g.groups.name}（${g.role}）` : `権限なし（${g.role}）`}
+                    size="small"
+                    variant="outlined"
+                  />
+                ))}
+              </Stack>
+            )}
+          </Box>
+
+          {/* Top liked posts */}
+          {topLiked.length > 0 && (
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
+                人気の投稿
+              </Typography>
+              <Paper variant="outlined" sx={{ borderRadius: 2 }}>
+                <List dense disablePadding>
+                  {topLiked.map((p, i) => (
+                    <Box key={p.id}>
+                      <ListItem
+                        component={NextLink}
+                        href={`/posts/${encodeURIComponent(p.id)}`}
+                        sx={{ px: 1.25, py: 0.75 }}
+                      >
+                        <ListItemText
+                          primaryTypographyProps={{
+                            noWrap: true,
+                            title: p.title,
+                            fontSize: ".95rem",
+                          }}
+                          primary={p.title}
+                          secondary={`❤ ${p.likes}`}
+                          secondaryTypographyProps={{ fontSize: ".8rem" }}
+                        />
+                      </ListItem>
+                      {i < topLiked.length - 1 && <Divider component="li" />}
+                    </Box>
+                  ))}
+                </List>
+              </Paper>
+            </Box>
+          )}
+        </Paper>
+      </Box>
+
+      {/* ===== Right: Posts Grid ===== */}
       <Box
         sx={{
           display: "grid",
-          gap: 2,
+          gap: { xs: 1.5, sm: 2 },
           gridTemplateColumns: {
             xs: "1fr",
             sm: "repeat(2, 1fr)",
-            md: "repeat(3, 1fr)",
-            lg: "repeat(4, 1fr)",
+            lg: "repeat(3, 1fr)",
+            xl: "repeat(4, 1fr)",
           },
+          alignContent: "start",
         }}
       >
         {posts.length === 0 ? (
@@ -283,7 +398,7 @@ export default function UserProfilePage() {
               key={p.id}
               title={p.title}
               cover_image_url={p.cover_image_url}
-              likeCount={0} // ← ダミー値（PostCard 側で省略可にしてもOK）
+              likeCount={0}
               author={{
                 display_name: profile.display_name,
                 username: profile.username,
@@ -291,6 +406,15 @@ export default function UserProfilePage() {
               }}
             />
           ))
+        )}
+
+        {/* Mobile bottom edit button */}
+        {isMe && isMdDown && posts.length > 0 && (
+          <Box sx={{ gridColumn: "1 / -1", mt: 1 }}>
+            <Button component={NextLink} href="/me" variant="outlined" fullWidth>
+              プロフィール編集
+            </Button>
+          </Box>
         )}
       </Box>
     </Box>

@@ -23,6 +23,7 @@ import {
 import NextLink from "next/link";
 import Grid from "@mui/material/Grid"; // v7 Grid v2
 import { createClient } from "@/lib/supabase";
+import { useAuthCallbackOnThisPage } from "@/app/_hooks/useAuthCallbackOnThisPage";
 
 type Profile = {
   user_id: string;
@@ -49,6 +50,7 @@ const JOB_OPTIONS = [
 ];
 
 export default function EditProfilePage() {
+  useAuthCallbackOnThisPage();
   const supabase = useMemo(() => createClient(), []);
   const [uid, setUid] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
