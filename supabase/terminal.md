@@ -19,6 +19,8 @@ supabase db dump \
 re_Dkwt42Tf_KJps6RvieX4XzmyhDmMAHVsE
 
 # supabaseのdb_schemaをdevからprodにpushする
+## まずはmigrationファイルを作成　
+supabase migration new add_profiles_table
 supabase projects list
 supabase link --project-ref dmyujzosvmbidsxjttet
 supabase db pull --schema public
