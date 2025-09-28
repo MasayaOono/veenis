@@ -18,6 +18,15 @@ supabase db dump \
 # resendのAPIキー
 re_Dkwt42Tf_KJps6RvieX4XzmyhDmMAHVsE
 
+# supabaseのdb_schemaをdevからprodにpushする
+supabase projects list
+supabase link --project-ref dmyujzosvmbidsxjttet
+supabase db pull --schema public
+
+supabase link --project-ref zylkbsmbxctfdwatifxi
+supabase db dump -f prod_schema_backup.sql --schema-only
+supabase db execute -f ./supabase/schema.sql
+
 # supabase db pullのエラー解決
 oonosusumuwatarunoMacBook-Air:beuty_blog q.ohno$ supabase db pull
 Initialising login role...
@@ -52,3 +61,4 @@ supabase migration repair --status reverted 20250925015104
 改めて pull（必要スキーマだけ）
 
 supabase db pull --schema auth --schema public --schema storage
+

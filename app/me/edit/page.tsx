@@ -1,5 +1,6 @@
 // app/me/edit/page.tsx
 "use client";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Avatar,
@@ -19,9 +20,11 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  Switch,
+  FormControlLabel,
 } from "@mui/material";
 import NextLink from "next/link";
-import Grid from "@mui/material/Grid"; // v7 Grid v2
+import Grid from "@mui/material/Grid";
 import { createClient } from "@/lib/supabase";
 import { useAuthCallbackOnThisPage } from "@/app/_hooks/useAuthCallbackOnThisPage";
 
@@ -30,10 +33,10 @@ type Profile = {
   username: string | null;
   display_name: string | null;
   avatar_url: string | null;
-  job: string | null; // ★ 追加
+  job: string | null;
+  notifications_enabled?: boolean | null;
 };
 
-// 美容系の職業プリセット
 const JOB_OPTIONS = [
   "美容師",
   "理容師",
@@ -51,25 +54,30 @@ const JOB_OPTIONS = [
 
 export default function EditProfilePage() {
   useAuthCallbackOnThisPage();
+
   const supabase = useMemo(() => createClient(), []);
   const [uid, setUid] = useState<string | null>(null);
+
+  // 状態
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [notifSaving, setNotifSaving] = useState(false); // ← 通知の即時保存状態
   const [message, setMessage] = useState<string | null>(null);
   const [errorUserName, setErrorUserName] = useState<string | null>(null);
 
+  // 入力
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [job, setJob] = useState<string>(""); // ★ 追加
+  const [job, setJob] = useState<string>("");
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(true);
 
-  // 画像：既存URLと新規選択ファイル（保存時にだけアップロード）
+  // 画像
   const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string>("");
   const [file, setFile] = useState<File | null>(null);
   const previewUrl = useMemo(
     () => (file ? URL.createObjectURL(file) : currentAvatarUrl || ""),
     [file, currentAvatarUrl]
   );
-  // blob URL 後片付け
   const prevBlobRef = useRef<string | null>(null);
   useEffect(() => {
     if (file && previewUrl.startsWith("blob:")) {
@@ -96,19 +104,23 @@ export default function EditProfilePage() {
 
       const { data: p, error: e2 } = await supabase
         .from("profiles")
-        .select("user_id, username, display_name, avatar_url, job")
+        .select(
+          "user_id, username, display_name, avatar_url, job, notifications_enabled"
+        )
         .eq("user_id", id)
         .maybeSingle();
+
       if (e2) setMessage(e2.message);
 
       setUsername((p?.username ?? "") as string);
       setDisplayName((p?.display_name ?? "") as string);
       setCurrentAvatarUrl((p?.avatar_url ?? "") as string);
       setJob((p?.job ?? "") as string);
+      setNotificationsEnabled(p?.notifications_enabled ?? true);
 
       setLoading(false);
     })();
-  }, []);
+  }, [supabase]);
 
   // バリデーション
   const isValidUsername = (v: string) => /^[a-zA-Z0-9_]{3,32}$/.test(v);
@@ -143,7 +155,31 @@ export default function EditProfilePage() {
     );
   };
 
-  // 保存（ファイルがあればここでアップロード → URL を保存）
+  // 通知：スイッチ切替で即時保存（楽観更新）
+  const handleToggleNotifications = async (next: boolean) => {
+    if (!uid || notifSaving) return;
+    const prev = notificationsEnabled;
+    setNotificationsEnabled(next); // 楽観更新
+    setNotifSaving(true);
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .upsert({ user_id: uid, notifications_enabled: next });
+      if (error) {
+        setNotificationsEnabled(prev); // ロールバック
+        setMessage(error.message || "通知設定の更新に失敗しました");
+      } else {
+        setMessage(next ? "通知をオンにしました" : "通知をオフにしました");
+      }
+    } catch (e: any) {
+      setNotificationsEnabled(prev);
+      setMessage(e?.message || "通知設定の更新に失敗しました");
+    } finally {
+      setNotifSaving(false);
+    }
+  };
+
+  // 保存（他フィールド）
   const handleSave = async () => {
     if (!uid) return;
     if (errorUserName) return;
@@ -151,7 +187,6 @@ export default function EditProfilePage() {
     setSaving(true);
     try {
       let finalAvatarUrl = currentAvatarUrl;
-
       if (file) {
         const ext = (file.name.split(".").pop() || "webp").toLowerCase();
         const path = `${uid}/avatar-${Date.now()}.${ext}`;
@@ -171,13 +206,13 @@ export default function EditProfilePage() {
         username: username || null,
         display_name: displayName || null,
         avatar_url: finalAvatarUrl || null,
-        job: job || null, // ★ 追加
+        job: job || null,
+        // notifications_enabled は即時保存なのでここでは触らない
       };
 
       const { error } = await supabase.from("profiles").upsert(payload);
       if (error) throw error;
 
-      // 反映＆一時ファイルクリア
       setCurrentAvatarUrl(finalAvatarUrl);
       setFile(null);
       setMessage("保存しました");
@@ -196,20 +231,25 @@ export default function EditProfilePage() {
         alignItems="center"
         sx={{ mb: 2 }}
       >
-        <Typography variant="h5">プロフィール編集</Typography>
+        <Typography variant="h5" sx={{ fontWeight: 800 }}>
+          プロフィール編集
+        </Typography>
         <Link component={NextLink} href="/me" underline="hover">
           ← マイページへ戻る
         </Link>
       </Stack>
 
-      <Card variant="outlined">
-        <CardHeader title="基本情報" />
+      <Card variant="outlined" sx={{ overflow: "hidden" }}>
+        <CardHeader
+          title="基本情報"
+          subheader="ユーザー名は英数字とアンダースコアのみ（3〜32文字）。通知はスイッチで即時反映されます。"
+        />
         {loading && <LinearProgress />}
         <CardContent>
           <Grid container spacing={3}>
             {/* 左カラム */}
             <Grid size={{ xs: 12, md: 8 }}>
-              <Stack spacing={2}>
+              <Stack spacing={2.5}>
                 <TextField
                   label="ユーザー名（3〜32文字、英数字・_）"
                   value={username}
@@ -219,14 +259,16 @@ export default function EditProfilePage() {
                   helperText={
                     errorUserName || "URLやメンション等で使われます（任意）"
                   }
+                  inputProps={{ maxLength: 32 }}
                 />
                 <TextField
                   label="表示名"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
+                  inputProps={{ maxLength: 50 }}
                 />
 
-                {/* ★ 職業（Select） */}
+                {/* 職業 */}
                 <FormControl fullWidth>
                   <InputLabel id="job-label">職業</InputLabel>
                   <Select
@@ -243,6 +285,38 @@ export default function EditProfilePage() {
                   </Select>
                 </FormControl>
 
+                {/* ★ 通知設定（即時保存） */}
+                <Box
+                  sx={{
+                    p: 2,
+                    borderRadius: 2,
+                    border: "1px solid",
+                    borderColor: "divider",
+                    bgcolor: "background.default",
+                  }}
+                >
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={notificationsEnabled}
+                        onChange={(e) =>
+                          handleToggleNotifications(e.target.checked)
+                        }
+                        disabled={notifSaving || !uid}
+                      />
+                    }
+                    label="メール通知を受け取る"
+                  />
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    sx={{ mt: 0.5 }}
+                  >
+                    週1回程度、Veenis からのお知らせ・更新情報を受け取ります。
+                    {notifSaving ? " 更新中…" : " いつでもここでオン/オフできます。"}
+                  </Typography>
+                </Box>
+
                 <Stack direction="row" spacing={1}>
                   <Button
                     variant="contained"
@@ -257,8 +331,7 @@ export default function EditProfilePage() {
                 </Stack>
 
                 <Typography variant="caption" color="text.secondary">
-                  ※ アイコン画像は「選択」後、<b>保存時にアップロード</b>
-                  されます。
+                  ※ アイコン画像は「選択」後、<b>保存時にアップロード</b>されます。
                 </Typography>
               </Stack>
             </Grid>
