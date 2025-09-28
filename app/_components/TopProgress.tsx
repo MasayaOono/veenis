@@ -12,27 +12,48 @@ export default function TopProgress() {
   const [active, setActive] = useState(false);
   const [scale, setScale] = useState(0);
 
-  const hasMountedOnce = useRef(false);
+  const hasMountedOnce = useRef<boolean>(false);
+
+  // timers / raf
   const ivRef = useRef<number | null>(null);
   const t1Ref = useRef<number | null>(null);
-  const tFinishRef = useRef<number | null>(null);
-  const tDeadlineRef = useRef<number | null>(null);
-  const onLoadRef = useRef<() => void>();
+  const deadlineRef = useRef<number | null>(null);
+  const raf1Ref = useRef<number | null>(null);
+  const raf2Ref = useRef<number | null>(null);
+
+  // load listener
+  const onLoadRef = useRef<(() => void) | null>(null);
 
   const cleanupTimers = () => {
-    if (ivRef.current) clearInterval(ivRef.current);
-    if (t1Ref.current) clearTimeout(t1Ref.current);
-    if (tFinishRef.current) clearTimeout(tFinishRef.current);
-    if (tDeadlineRef.current) clearTimeout(tDeadlineRef.current);
+    if (ivRef.current != null) {
+      clearInterval(ivRef.current);
+      ivRef.current = null;
+    }
+    if (t1Ref.current != null) {
+      clearTimeout(t1Ref.current);
+      t1Ref.current = null;
+    }
+    if (deadlineRef.current != null) {
+      clearTimeout(deadlineRef.current);
+      deadlineRef.current = null;
+    }
+    if (raf1Ref.current != null) {
+      cancelAnimationFrame(raf1Ref.current);
+      raf1Ref.current = null;
+    }
+    if (raf2Ref.current != null) {
+      cancelAnimationFrame(raf2Ref.current);
+      raf2Ref.current = null;
+    }
     if (onLoadRef.current) {
       window.removeEventListener("load", onLoadRef.current);
-      onLoadRef.current = undefined;
+      onLoadRef.current = null;
     }
-    ivRef.current = t1Ref.current = tFinishRef.current = tDeadlineRef.current = null;
   };
 
   const finish = () => {
     setScale(1);
+    // 少し待ってから消す
     window.setTimeout(() => {
       setActive(false);
       setScale(0);
@@ -46,14 +67,15 @@ export default function TopProgress() {
     setScale(0.2);
 
     // スッと伸びる
-    t1Ref.current = window.setTimeout(() => setScale(0.6), 80) as any;
-    // ちょいちょい伸びる（0.9まで）
+    t1Ref.current = window.setTimeout(() => setScale(0.6), 80) as unknown as number;
+
+    // ちょいちょい伸びる（0.9 まで）
     ivRef.current = window.setInterval(() => {
       setScale((v) => Math.min(0.9, v + Math.random() * 0.06));
-    }, 250) as any;
+    }, 250) as unknown as number;
 
     // フェイルセーフ（最大 8 秒）
-    tDeadlineRef.current = window.setTimeout(finish, 8000) as any;
+    deadlineRef.current = window.setTimeout(finish, 8000) as unknown as number;
 
     // ページロード完了でも終わる（リロード系の保険）
     const onLoad = () => finish();
@@ -68,22 +90,23 @@ export default function TopProgress() {
       return;
     }
 
-    // ここからクライアント遷移のみ：開始 → 「次の描画」で完了
+    // クライアント遷移: 開始 → 次の描画で完了
     start();
 
-    // 最初の描画タイミングで完了させる（二段 rAF）
-    const r1 = requestAnimationFrame(() => {
-      const r2 = requestAnimationFrame(() => finish());
-      tFinishRef.current = r2 as any; // クリア用に保持
+    // 二段 rAF で「描画が起きたら」確実に閉じる
+    raf1Ref.current = requestAnimationFrame(() => {
+      raf2Ref.current = requestAnimationFrame(() => finish());
     });
-    tFinishRef.current = r1 as any;
 
-    // クリーンアップは「タイマーとリスナの解除だけ」
+    // アンマウント/キー変更時の掃除
     return () => cleanupTimers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
-  useEffect(() => () => cleanupTimers(), []);
+  useEffect(() => {
+    // コンポーネント完全破棄時も掃除
+    return () => cleanupTimers();
+  }, []);
 
   if (!active) return null;
 
@@ -115,7 +138,7 @@ export default function TopProgress() {
           height: 100%;
           opacity: 0.7;
           filter: blur(4px);
-          background: radial-gradient(closest-side, rgba(255,255,255,.9), transparent);
+          background: radial-gradient(closest-side, rgba(255, 255, 255, 0.9), transparent);
         }
       `}</style>
     </div>
