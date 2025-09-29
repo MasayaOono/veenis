@@ -42,10 +42,6 @@ function AppIntro() {
   const theme = useTheme();
   const [open, setOpen] = useState(false);
 
-
-
-  
-
   // 初回訪問のみ表示（localStorage フラグ）
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -59,7 +55,9 @@ function AppIntro() {
     }
     setOpen(false);
   }, []);
-
+  const onClose = useCallback(() => {
+    setOpen(false);
+  }, []);
   const paperStyles = {
     px: { xs: 2, sm: 3 },
     py: { xs: 2, sm: 2.5 },
@@ -92,7 +90,15 @@ function AppIntro() {
       PaperProps={{ sx: paperStyles }}
     >
       {/* ロゴ */}
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: { xs: 0.5, sm: 1 }, mb: 0.5 }}>
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          gap: 1,
+          mt: { xs: 0.5, sm: 1 },
+          mb: 0.5,
+        }}
+      >
         <Box
           sx={{
             width: 28,
@@ -102,26 +108,44 @@ function AppIntro() {
             boxShadow: "0 4px 16px rgba(6,182,212,0.35)",
           }}
         />
-        <Typography variant="overline" sx={{ letterSpacing: 1.2, opacity: 0.9 }}>
+        <Typography
+          variant="overline"
+          sx={{ letterSpacing: 1.2, opacity: 0.9 }}
+        >
           VEENIS
         </Typography>
       </Box>
 
-      <DialogTitle id="veenis-intro-title" sx={{ fontWeight: 800, lineHeight: 1.2, px: 0, pt: 0, pb: 0.5 }}>
+      <DialogTitle
+        id="veenis-intro-title"
+        sx={{ fontWeight: 800, lineHeight: 1.2, px: 0, pt: 0, pb: 0.5 }}
+      >
         現場知見を、みんなの力で磨こう。
       </DialogTitle>
 
       <DialogContent dividers sx={{ px: 0, border: "none" }}>
         <Typography sx={{ mb: 2, opacity: 0.9 }}>
-          Veenis は、美容の<b>学生さん・アシスタント・若手〜ベテラン</b>まで、<br/>
+          Veenis は、美容の<b>学生さん・アシスタント・若手〜ベテラン</b>まで、
+          <br />
           「施術設計・運用ノウハウ」を
-          <b>書く／集める／共有する</b>ための<br/>ワークスペースです。
+          <b>書く／集める／共有する</b>ための
+          <br />
+          ワークスペースです。
         </Typography>
 
         <Stack spacing={1.25} sx={{ mb: 2 }}>
-          <FeatureChip label="書く" text="テンプレから素早く書き出し。短くてもOK、まず一歩。" />
-          <FeatureChip label="集める" text="タグで整理。自分だけの“辞書”として後から使える。" />
-          <FeatureChip label="共有" text="完全公開 or グループ限定を選べます。" />
+          <FeatureChip
+            label="書く"
+            text="テンプレから素早く書き出し。短くてもOK、まず一歩。"
+          />
+          <FeatureChip
+            label="集める"
+            text="タグで整理。自分だけの“辞書”として後から使える。"
+          />
+          <FeatureChip
+            label="共有"
+            text="完全公開 or グループ限定を選べます。"
+          />
         </Stack>
 
         {/* スタートガイド（やってみたくなる導線） */}
@@ -130,7 +154,10 @@ function AppIntro() {
             p: 1.5,
             borderRadius: 3,
             border: `1px dashed ${theme.palette.divider}`,
-            bgcolor: theme.palette.mode === "dark" ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+            bgcolor:
+              theme.palette.mode === "dark"
+                ? "rgba(255,255,255,0.04)"
+                : "rgba(0,0,0,0.03)",
           }}
         >
           <Typography variant="body2" sx={{ mb: 1, fontWeight: 600 }}>
@@ -147,14 +174,18 @@ function AppIntro() {
               3) 公開範囲（公開 or グループ）を選んで保存
             </Typography>
           </Stack>
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ display: "block", mt: 1 }}
+          >
             ※ 記事の作成にはログインが必要です。
           </Typography>
         </Box>
       </DialogContent>
 
       <DialogActions sx={{ px: 0, pt: 2, gap: 1 }}>
-        <Button component={NextLink} href="/about" color="inherit" sx={{ opacity: 0.9 }} onClick={closeAndRemember}>
+        <Button color="inherit" sx={{ opacity: 0.9 }} onClick={onClose}>
           記事を見てみる
         </Button>
         <Button
@@ -162,7 +193,9 @@ function AppIntro() {
           href="/auth/login?next=/posts/new"
           onClick={closeAndRemember}
           variant="contained"
-          sx={{ background: "linear-gradient(135deg, #7C3AED 0%, #06B6D4 100%)" }}
+          sx={{
+            background: "linear-gradient(135deg, #7C3AED 0%, #06B6D4 100%)",
+          }}
         >
           ログインしてはじめる
         </Button>
@@ -178,7 +211,11 @@ function FeatureChip({ label, text }: { label: string; text: string }) {
       <Chip
         size="small"
         label={label}
-        sx={{ bgcolor: "transparent", border: "1px solid", borderColor: "primary.main" }}
+        sx={{
+          bgcolor: "transparent",
+          border: "1px solid",
+          borderColor: "primary.main",
+        }}
       />
       <Typography variant="body2" sx={{ opacity: 0.9 }}>
         {text}
