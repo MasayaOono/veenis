@@ -100,9 +100,9 @@ export default function LoginPage() {
             ログイン
           </Button>
           <Typography variant="body2">
-            アカウント未作成？{" "}
+            アカウント未作成の方は
             <Link component={NextLink} href="/auth/signup">
-              新規登録へ
+              新規登録
             </Link>
           </Typography>
         </Stack>

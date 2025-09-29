@@ -12,13 +12,7 @@ export default function ContactPage() {
         <li>
           メール：
           <a href="mailto:【TODO】support@veenis.example">
-            【TODO】support@veenis.example
-          </a>
-        </li>
-        <li>
-          フォーム：
-          <a href="https://forms.gle/【TODO】" target="_blank" rel="noreferrer">
-            Googleフォーム
+            veenis.info@gmail.com
           </a>
         </li>
       </ul>
