@@ -41,10 +41,10 @@ export default function SignupPage() {
     if (password !== confirm) return setErr("パスワードが一致しません。");
     setLoading(true);
 
-  const redirect =
-  typeof window !== "undefined"
-    ? `${window.location.origin}/me/edit`
-    : undefined;
+    const redirect =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/me/edit`
+        : undefined;
 
     const { data, error } = await supabase.auth.signUp({
       email,
@@ -106,9 +106,9 @@ export default function SignupPage() {
             新規登録
           </Button>
           <Typography variant="body2">
-            すでにアカウントをお持ち？{" "}
+            すでにアカウントをお持ちの方は
             <Link component={NextLink} href="/auth/login">
-              ログインへ
+              ログイン
             </Link>
           </Typography>
         </Stack>

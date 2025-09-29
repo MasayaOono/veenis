@@ -12,15 +12,29 @@ import {
   IconButton,
   alpha,
   useTheme,
+  SvgIcon,
 } from "@mui/material";
-import XIcon from "@mui/icons-material/X";
 import InstagramIcon from "@mui/icons-material/Instagram";
-import YouTubeIcon from "@mui/icons-material/YouTube";
+
+/** 簡易 Threads アイコン（必要なら公式SVGに差し替えてOK） */
+function ThreadsIcon(props: React.ComponentProps<typeof SvgIcon>) {
+  return (
+    <SvgIcon {...props} viewBox="0 0 24 24">
+      {/* outer ring */}
+      <path d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25z" />
+      {/* stylized @-like curve */}
+      <path
+        d="M15.8 12.2c0 2.35-1.83 3.8-3.96 3.8-1.46 0-2.68-.6-3.44-1.6l1.23-.94c.51.62 1.33 1.04 2.23 1.04 1.2 0 2.06-.72 2.06-1.9 0-1.16-.77-1.84-1.92-1.84-.64 0-1.2.18-1.76.58l-.16-1.4c.64-.39 1.32-.58 2.03-.58.9 0 1.68.26 2.27.77.43.38.74.9.88 1.54.29.03.61.07 1.04.13-.24-1.19-.79-2.07-1.62-2.73-.8-.63-1.87-.98-3.09-.98-1.02 0-1.98.23-2.85.69l-.07.04-.06-1.42c1.01-.45 2.09-.68 3.2-.68 1.6 0 2.98.45 4 1.31 1.01.84 1.58 2.02 1.58 3.65z"
+        fillRule="evenodd"
+      />
+    </SvgIcon>
+  );
+}
 
 const footerLinksPrimary = [
   { label: "利用規約", href: "/legal/terms" },
   { label: "プライバシーポリシー", href: "/legal/privacy" },
-  { label: "特定商取引法に基づく表記", href: "/legal/tokushoho" },
+  // { label: "特定商取引法に基づく表記", href: "/legal/tokushoho" },
   { label: "ヘルプ", href: "/help" },
 ];
 
@@ -112,32 +126,26 @@ export default function Footer() {
           </Typography>
 
           <Stack direction="row" spacing={0.5}>
-            <IconButton
-              aria-label="X"
-              href="https://x.com/your_account"
-              target="_blank"
-              rel="noreferrer"
-              size="small"
-            >
-              <XIcon fontSize="small" />
-            </IconButton>
+            {/* Instagram */}
             <IconButton
               aria-label="Instagram"
-              href="https://instagram.com/your_account"
+              href="https://www.instagram.com/veenis_official"
               target="_blank"
               rel="noreferrer"
               size="small"
             >
               <InstagramIcon fontSize="small" />
             </IconButton>
+
+            {/* Threads */}
             <IconButton
-              aria-label="YouTube"
-              href="https://youtube.com/@your_account"
+              aria-label="Threads"
+              href="https://www.threads.com/@veenis_official"
               target="_blank"
               rel="noreferrer"
               size="small"
             >
-              <YouTubeIcon fontSize="small" />
+              <ThreadsIcon fontSize="small" />
             </IconButton>
           </Stack>
         </Stack>
