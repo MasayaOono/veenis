@@ -546,10 +546,7 @@ export default function ClientPostPage() {
       >
         <DialogTitle>記事を削除しますか？</DialogTitle>
         <DialogContent>
-          <DialogContentText>
-            この操作は元に戻せません。記事本文・メタ情報は削除されます。
-            （いいね/タグ等はDBの設定により併せて削除・無効化されます）
-          </DialogContentText>
+          <DialogContentText>この操作は元に戻せません。</DialogContentText>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setConfirmOpen(false)} disabled={busyDelete}>

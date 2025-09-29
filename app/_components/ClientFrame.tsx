@@ -13,10 +13,14 @@ export default function ClientFrame({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const isPostNew = pathname?.startsWith("/posts/new");
 
-  const showFooter = !isPostNew;
-  const showHeader = !isPostNew;
+  // ぴったり /posts/new のとき
+  const isPostNew = pathname === "/posts/new";
+
+  // /posts/<id>/edit のとき（id はスラッシュを含まない）
+  const isPostEdit = /^\/posts\/[^/]+\/edit\/?$/.test(pathname);
+  const showFooter = !isPostNew && !isPostEdit; // 表示: 閲覧モードのときのみ
+  const showHeader = !isPostNew && !isPostEdit;
 
   return (
     <>
