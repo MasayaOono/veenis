@@ -57,12 +57,12 @@ export default function UserProfilePage() {
   const supabase = useMemo(() => createClient(), []);
   const { username } = useParams<{ username: string }>();
   const theme = useTheme();
-  const isSmDown = useMediaQuery(theme.breakpoints.down("sm"));
   const isMdDown = useMediaQuery(theme.breakpoints.down("md"));
 
   const [meId, setMeId] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [posts, setPosts] = useState<PostRow[]>([]);
+  const [likeMap, setLikeMap] = useState<Record<string, number>>({}); // ← 追加：投稿ID→いいね数
   const [totalLikes, setTotalLikes] = useState<number>(0);
   const [draftCount, setDraftCount] = useState<number>(0);
   const [groups, setGroups] = useState<GroupRow[]>([]);
@@ -114,7 +114,7 @@ export default function UserProfilePage() {
         // 最新公開日
         setLatestPublishedAt(list[0]?.published_at ?? null);
 
-        // いいね総数 & 人気の投稿（上位3）
+        // いいね（投稿ごとのマップ & 合計 & トップ3）
         if (list.length > 0) {
           const ids = list.map((p) => p.id);
           const likesRes = await supabase
@@ -127,16 +127,29 @@ export default function UserProfilePage() {
             for (const row of likesRes.data as { post_id: string }[]) {
               counts.set(row.post_id, (counts.get(row.post_id) ?? 0) + 1);
             }
+            // Map -> plain object
+            const obj: Record<string, number> = {};
+            counts.forEach((v, k) => (obj[k] = v));
+            setLikeMap(obj);
+
             const total = Array.from(counts.values()).reduce((a, b) => a + b, 0);
             setTotalLikes(total);
 
-            // トップ3
             const ranked = [...list]
               .map((p) => ({ id: p.id, title: p.title, likes: counts.get(p.id) ?? 0 }))
               .sort((a, b) => b.likes - a.likes)
               .slice(0, 3);
             setTopLiked(ranked);
+          } else {
+            // いいね0件の場合の初期化
+            setLikeMap({});
+            setTotalLikes(0);
+            setTopLiked([]);
           }
+        } else {
+          setLikeMap({});
+          setTotalLikes(0);
+          setTopLiked([]);
         }
       }
 
@@ -217,30 +230,14 @@ export default function UserProfilePage() {
         mx: "auto",
         px: { xs: 1.5, sm: 2 },
         py: { xs: 2, sm: 3 },
-        // 2カラム（md+）：左サイド固定幅 + 右メイン、sm以下は1カラム
         display: "grid",
         gridTemplateColumns: { xs: "1fr", md: "360px 1fr" },
         gap: { xs: 2, md: 3 },
       }}
     >
       {/* ===== Left: User Card (sticky) ===== */}
-      <Box
-        sx={{
-          position: { md: "sticky" },
-          top: { md: 88 },
-          alignSelf: "start",
-        }}
-      >
-        {/* Hero-like Card */}
-        <Paper
-          variant="outlined"
-          sx={{
-            p: 2,
-            borderRadius: 3,
-            overflow: "hidden",
-            borderColor: "divider",
-          }}
-        >
+      <Box sx={{ position: { md: "sticky" }, top: { md: 88 }, alignSelf: "start" }}>
+        <Paper variant="outlined" sx={{ p: 2, borderRadius: 3, overflow: "hidden", borderColor: "divider" }}>
           <Stack direction="row" spacing={2} alignItems="center">
             <Avatar
               src={profile.avatar_url ?? undefined}
@@ -270,12 +267,7 @@ export default function UserProfilePage() {
           </Stack>
 
           {/* Stats row */}
-          <Stack
-            direction="row"
-            spacing={1}
-            sx={{ mt: 1.5, flexWrap: "wrap" }}
-            useFlexGap
-          >
+          <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: "wrap" }} useFlexGap>
             <Button
               component={NextLink}
               href={`/users/${encodeURIComponent(profile.username || "")}/following`}
@@ -293,16 +285,11 @@ export default function UserProfilePage() {
               フォロワー&nbsp;<b>{followersCount}</b>
             </Button>
           </Stack>
-                <Stack
-            direction="row"
-            spacing={1}
-            sx={{ mt: 1.5, flexWrap: "wrap" }}
-            useFlexGap
-          >
+
+          <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: "wrap" }} useFlexGap>
             <Chip label={`記事 ${posts.length}`} size="small" />
             <Chip label={`総いいね ${totalLikes}`} size="small" />
             {isMe && <Chip label={`下書き ${draftCount}`} size="small" />}
-
           </Stack>
 
           <Divider sx={{ my: 2 }} />
@@ -356,11 +343,7 @@ export default function UserProfilePage() {
                         sx={{ px: 1.25, py: 0.75 }}
                       >
                         <ListItemText
-                          primaryTypographyProps={{
-                            noWrap: true,
-                            title: p.title,
-                            fontSize: ".95rem",
-                          }}
+                          primaryTypographyProps={{ noWrap: true, title: p.title, fontSize: ".95rem" }}
                           primary={p.title}
                           secondary={`❤ ${p.likes}`}
                           secondaryTypographyProps={{ fontSize: ".8rem" }}
@@ -396,9 +379,10 @@ export default function UserProfilePage() {
           posts.map((p) => (
             <PostCard
               key={p.id}
+              id={p.id}
               title={p.title}
               cover_image_url={p.cover_image_url}
-              likeCount={0}
+              likeCount={likeMap[p.id] ?? 0}     // ← ここで反映
               author={{
                 display_name: profile.display_name,
                 username: profile.username,
